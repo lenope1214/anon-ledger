@@ -641,10 +641,13 @@ function renderSettings() {
         </form>
       </section>
       <section class="card">
-        <h2>데이터 백업</h2>
-        <p class="hint">모든 장부 데이터가 담긴 파일을 내려받습니다. 안전한 곳에 보관하세요.<br>
-        복원하려면 서버의 <b>data/db.json</b> 자리에 이 파일을 넣고 서버를 재시작하면 됩니다.</p>
+        <h2>데이터 백업 · 복원</h2>
+        <p class="hint">모든 장부 데이터가 담긴 파일을 내려받습니다. 안전한 곳에 보관하세요.</p>
         <a class="btn-link" href="/api/backup" download>💾 백업 파일 다운로드</a>
+        <hr class="divider">
+        <p class="hint">백업 파일로 장부 전체를 되돌립니다. 다른 곳(예: 기존 PC)에서 받은 백업을
+        여기에 올리면 데이터가 그대로 옮겨집니다. <b>현재 데이터는 모두 교체</b>되고, 비밀번호는 지금 것이 유지됩니다.</p>
+        <label class="btn-link restore-btn">📂 백업 파일로 복원<input type="file" id="restoreFile" accept=".json,application/json" hidden></label>
       </section>
     </div>`;
   $('#settingsForm').addEventListener('submit', async (e) => {
@@ -660,6 +663,21 @@ function renderSettings() {
       toast('비밀번호를 변경했습니다.');
     } catch (err) {
       alert(err.message);
+    }
+  });
+  $('#restoreFile').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    e.target.value = '';
+    if (!file) return;
+    if (!confirm(`'${file.name}' 파일의 내용으로 장부 전체를 교체할까요?\n현재 등록된 상호·제품·거래가 모두 백업 파일 내용으로 바뀝니다.`)) return;
+    try {
+      const data = JSON.parse(await file.text());
+      await api('POST', '/api/restore', data);
+      toast('복원했습니다.');
+      state.settings = await api('GET', '/api/settings');
+      render();
+    } catch (err) {
+      alert('복원 실패: ' + (err.message || '파일을 읽을 수 없습니다.'));
     }
   });
 }

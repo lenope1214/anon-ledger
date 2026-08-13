@@ -1,7 +1,8 @@
 # 📒 거래장부 (anon-ledger)
 
 컴장부를 대신하는 간단한 거래 장부 웹앱입니다.
-PC에서 서버를 켜 두면 **PC와 휴대폰 모두** 브라우저로 같은 장부를 사용할 수 있습니다.
+**PC와 휴대폰 모두** 브라우저로 같은 장부를 사용할 수 있으며,
+Vercel에 배포하면 어디서든 24시간 접속됩니다.
 
 ## 기능
 
@@ -42,29 +43,37 @@ node server.js
 
 ## 데이터 저장과 백업
 
-- 모든 데이터는 서버의 `data/db.json` **파일 하나**에 저장됩니다. PC·휴대폰 브라우저에는
-  데이터가 남지 않으므로, 어느 기기에서 보든 항상 같은 장부입니다.
-- **백업 = 이 파일을 복사**해 두면 됩니다. [내 정보] 탭의 '백업 파일 다운로드' 버튼으로도
-  받을 수 있습니다. 복원할 때는 파일을 `data/db.json` 자리에 놓고 서버를 재시작하세요.
+- 데이터는 서버 한 곳에만 저장됩니다 — 로컬 실행 시 `data/db.json` 파일,
+  Vercel 배포 시 Neon(Postgres) 데이터베이스. PC·휴대폰 브라우저에는 데이터가
+  남지 않으므로, 어느 기기에서 보든 항상 같은 장부입니다.
+- **백업**: [내 정보] 탭의 '백업 파일 다운로드' 버튼으로 JSON 파일을 받아 보관하세요.
+- **복원**: [내 정보] 탭의 '백업 파일로 복원'에 백업 파일을 올리면 장부 전체가
+  그 내용으로 교체됩니다 (비밀번호는 현재 것 유지). 로컬↔Vercel 간 데이터 이동도 이 방법으로 합니다.
 
-## 외부(집·가게 밖)에서 접속하기
+## Vercel로 배포하기 (외부 접속, 추천)
 
-같은 와이파이 밖에서도 쓰려면 아래 중 하나를 선택하세요. 어떤 방법이든 장부 데이터는
-서버 역할을 하는 컴퓨터의 `data/db.json`에만 저장됩니다.
+PC를 켜 두지 않아도 어디서든 접속되는 방법입니다. 무료 요금제로 충분합니다.
 
-1. **Cloudflare Tunnel (추천, 무료)** — 공유기 포트를 열지 않고 `https://...` 주소를 발급받는 방식.
-   [cloudflared](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/)를
-   설치한 뒤 `cloudflared tunnel --url http://localhost:3000` 실행. HTTPS 암호화가 자동 적용됩니다.
-2. **Tailscale (무료)** — 내 기기끼리만 연결되는 VPN. PC와 휴대폰에 [Tailscale](https://tailscale.com) 앱을
-   설치하고 같은 계정으로 로그인하면, 외부에서도 `http://PC이름:3000`으로 접속됩니다.
-   외부에 전혀 공개되지 않아 가장 안전합니다.
-3. **클라우드 서버(VPS)** — PC를 항상 켜 둘 수 없다면 월 몇천 원짜리 VPS에 올리는 방법.
-   Node.js 설치 후 이 폴더를 복사하고 `node server.js` 실행이 전부이며,
-   기존 데이터 이전도 `data/db.json` 파일 복사만 하면 됩니다. (HTTPS는 Caddy 등으로 적용 권장)
+1. [vercel.com](https://vercel.com)에 GitHub 계정으로 가입 → **Add New → Project** →
+   이 저장소(`anon-ledger`)를 Import (설정은 기본값 그대로 Deploy)
+2. 프로젝트 **Settings → Git → Production Branch**를 `production`으로 변경
+3. **Storage 탭 → Create Database → Neon (Postgres)** 생성·연결
+   (환경변수 `DATABASE_URL`이 자동 등록됩니다)
+4. **Deployments → 최신 항목 → Redeploy** (DB 연결을 반영하기 위해 한 번 재배포)
+5. 발급된 `https://프로젝트명.vercel.app` 주소로 접속 → 첫 화면에서 비밀번호 만들기 → 끝!
 
-> ⚠️ 1·3번처럼 인터넷에 공개하는 경우 반드시 **HTTPS 주소로만** 사용하세요.
-> 비밀번호 로그인은 기본 탑재되어 있습니다.
+- **기존 PC 데이터 옮기기**: 로컬 서버의 [내 정보] → 백업 파일 다운로드 →
+  Vercel 주소의 [내 정보] → '백업 파일로 복원' 업로드. 이게 전부입니다.
+- Vercel에서는 데이터가 Neon(Postgres)에 저장됩니다. 무료 DB는 한동안 사용이 없으면
+  절전 상태가 되어 첫 접속이 1~2초 느릴 수 있습니다 (데이터는 그대로 유지).
+
+## 그 외 외부 접속 방법 (PC를 서버로 쓸 때)
+
+- **Cloudflare Tunnel (무료)** — `cloudflared tunnel --url http://localhost:3000` 실행으로
+  `https://` 주소 발급. 데이터가 내 PC의 `data/db.json`에 남습니다.
+- **Tailscale (무료)** — PC·휴대폰에 앱 설치 후 같은 계정 로그인. 외부에 전혀 공개되지 않는 VPN 방식.
 
 ## 참고
 
-- 서버는 Node.js 기본 모듈만 사용합니다 (외부 패키지 없음).
+- 로컬 실행 시 서버는 Node.js 기본 모듈만 사용합니다 (`npm install` 불필요).
+- Vercel 배포 시에만 `@neondatabase/serverless` 패키지가 사용됩니다 (Vercel이 자동 설치).
