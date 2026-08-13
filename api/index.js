@@ -4,7 +4,7 @@ const core = require('../lib/core');
 
 const hasDb = Boolean(process.env.DATABASE_URL || process.env.POSTGRES_URL);
 if (hasDb) {
-  core.setStore(require('../lib/store-pg')(core.normalizeDb));
+  core.setStore(require('../lib/store-pg')(core.normalizeLedger));
 }
 
 module.exports = async (req, res) => {

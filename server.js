@@ -18,7 +18,7 @@ const HOST = process.env.HOST || '0.0.0.0';
 const DATA_DIR = path.join(__dirname, 'data');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
-core.setStore(createFileStore(DATA_DIR, core.normalizeDb));
+core.setStore(createFileStore(DATA_DIR, core.normalizeLedger));
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
