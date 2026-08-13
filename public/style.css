@@ -218,6 +218,8 @@ form label input, form label select { margin-top: 0.2rem; font-weight: 400; }
 }
 
 .btn-link:hover { background: #f1f5f9; }
+.restore-btn { cursor: pointer; font-weight: 400; }
+.divider { border: none; border-top: 1px solid var(--line); margin: 1rem 0; }
 
 /* ─────────────── 토스트 ─────────────── */
 #toast {
