@@ -6,6 +6,7 @@ const $$ = (sel, el = document) => Array.from(el.querySelectorAll(sel));
 
 const state = {
   tab: 'companies',
+  me: null,             // { username, status, isAdmin }
   companies: [],
   settings: {},
   companySearch: '',
@@ -95,6 +96,7 @@ function render() {
   if (state.tab === 'companies') renderCompanies();
   else if (state.tab === 'products') renderProducts();
   else if (state.tab === 'transactions') renderTransactions();
+  else if (state.tab === 'admin') renderAdmin();
   else renderSettings();
 }
 
@@ -682,6 +684,86 @@ function renderSettings() {
   });
 }
 
+/* ─────────────── 관리자 (계정 관리) ─────────────── */
+async function renderAdmin() {
+  const users = await api('GET', '/api/admin/users');
+  const pending = users.filter((u) => u.status === 'pending').length;
+  const badge = (s) =>
+    s === 'approved' ? '<span class="badge ok">승인됨</span>'
+    : s === 'rejected' ? '<span class="badge no">거절됨</span>'
+    : '<span class="badge wait">대기중</span>';
+  $('#main').innerHTML = `
+    <section class="card">
+      <h2>계정 관리</h2>
+      <p class="summary">전체 ${users.length}명 · 승인 대기 ${pending}명</p>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>아이디</th><th>가입일</th><th>상태</th><th class="actions"></th></tr></thead>
+          <tbody id="adminRows">
+            ${users
+              .map(
+                (u) => `<tr class="${u.status === 'pending' ? 'row-pending' : ''}">
+                  <td><b>${esc(u.username)}</b>${u.isAdmin ? ' <span class="badge admin">관리자</span>' : ''}</td>
+                  <td>${esc((u.createdAt || '').slice(0, 10))}</td>
+                  <td>${badge(u.status)}</td>
+                  <td class="actions">${
+                    u.isAdmin
+                      ? ''
+                      : `${u.status !== 'approved' ? `<button data-act="approve" data-u="${esc(u.username)}" class="primary">승인</button>` : ''}
+                         ${u.status !== 'rejected' ? `<button data-act="reject" data-u="${esc(u.username)}">거절</button>` : ''}
+                         <button data-act="del" data-u="${esc(u.username)}" class="danger">삭제</button>`
+                  }</td>
+                </tr>`
+              )
+              .join('')}
+          </tbody>
+        </table>
+      </div>
+      <p class="hint">승인된 계정만 장부를 사용할 수 있습니다. 거절하면 해당 계정은 로그인해도 이용할 수 없습니다.<br>
+      삭제하면 그 계정의 장부 데이터도 함께 사라집니다.</p>
+    </section>`;
+  $('#adminRows').onclick = async (e) => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const username = btn.dataset.u;
+    const act = btn.dataset.act;
+    try {
+      if (act === 'approve') {
+        await api('POST', '/api/admin/users/' + encodeURIComponent(username) + '/approve');
+        toast(`'${username}' 계정을 승인했습니다.`);
+      } else if (act === 'reject') {
+        if (!confirm(`'${username}' 계정의 이용을 거절할까요?`)) return;
+        await api('POST', '/api/admin/users/' + encodeURIComponent(username) + '/reject');
+        toast(`'${username}' 계정을 거절했습니다.`);
+      } else if (act === 'del') {
+        if (!confirm(`'${username}' 계정을 삭제할까요?\n이 계정의 장부 데이터도 모두 삭제됩니다.`)) return;
+        await api('DELETE', '/api/admin/users/' + encodeURIComponent(username));
+        toast(`'${username}' 계정을 삭제했습니다.`);
+      }
+      renderAdmin();
+    } catch (err) {
+      alert(err.message);
+    }
+  };
+}
+
+/* ─────────────── 승인 대기 / 거절 화면 ─────────────── */
+function renderBlocked(st) {
+  const rejected = st.status === 'rejected';
+  $('#tabs').classList.add('hidden');
+  $('#main').innerHTML = `
+    <section class="card narrow">
+      <div class="empty-notice">
+        <p class="blocked-icon">${rejected ? '🚫' : '⏳'}</p>
+        <p><b>${rejected ? '가입이 거절되었습니다.' : '관리자 승인을 기다리고 있습니다.'}</b></p>
+        <p class="hint">${rejected ? '자세한 내용은 관리자에게 문의하세요.' : '가입 신청이 접수되었습니다.<br>관리자가 승인하면 바로 장부를 사용할 수 있습니다.'}</p>
+        ${rejected ? '' : '<button class="primary" id="btnRecheck">승인됐는지 확인</button>'}
+      </div>
+    </section>`;
+  const btn = $('#btnRecheck');
+  if (btn) btn.addEventListener('click', () => location.reload());
+}
+
 /* ─────────────── 시작 ─────────────── */
 $('#btnLogout').addEventListener('click', async () => {
   if (!confirm('로그아웃할까요?')) return;
@@ -691,7 +773,7 @@ $('#btnLogout').addEventListener('click', async () => {
 
 (async function init() {
   const hash = location.hash.slice(1);
-  if (['companies', 'products', 'transactions', 'settings'].includes(hash)) {
+  if (['companies', 'products', 'transactions', 'settings', 'admin'].includes(hash)) {
     state.tab = hash;
     $$('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === hash));
   }
@@ -701,6 +783,13 @@ $('#btnLogout').addEventListener('click', async () => {
       location.href = '/login.html';
       return;
     }
+    state.me = st;
+    $('#whoami').textContent = st.username ? st.username + '님' : '';
+    if (st.status !== 'approved') {
+      renderBlocked(st);
+      return;
+    }
+    if (st.isAdmin) $('#tabAdminBtn').classList.remove('hidden');
     state.settings = await api('GET', '/api/settings');
     await refreshCompanies();
   } catch (e) {
