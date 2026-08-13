@@ -10,52 +10,64 @@
 <body class="login-body">
 <div class="card login-card">
   <h1 class="login-title">📒 거래장부</h1>
-  <p id="loginHint" class="hint"></p>
+  <div class="auth-tabs">
+    <button type="button" id="tabLogin" class="active">로그인</button>
+    <button type="button" id="tabSignup">회원가입</button>
+  </div>
   <form id="loginForm">
+    <label>아이디<input id="username" required autocomplete="username" placeholder="예: hong123"></label>
     <label>비밀번호<input id="pw" type="password" required minlength="4" autocomplete="current-password"></label>
     <label id="pw2Label" class="hidden">비밀번호 확인<input id="pw2" type="password" autocomplete="new-password"></label>
     <p id="loginError" class="login-error hidden"></p>
     <button type="submit" class="primary login-btn" id="loginBtn">로그인</button>
   </form>
+  <p class="hint login-hint" id="modeHint">계정이 없다면 [회원가입]으로 새 장부를 만드세요.<br>계정마다 완전히 분리된 자기 장부를 갖습니다.</p>
 </div>
 <script>
 (async () => {
   const $ = (s) => document.querySelector(s);
-  let needsSetup = false;
+  let mode = 'login';
+
   try {
     const st = await fetch('/api/auth/status').then((r) => r.json());
     if (st.authed) { location.href = '/'; return; }
-    needsSetup = st.needsSetup;
-  } catch (e) { /* 서버 연결 실패 시 로그인 시도에서 안내됨 */ }
+  } catch (e) { /* 서버 연결 실패 시 제출할 때 안내됨 */ }
 
-  if (needsSetup) {
-    $('#loginHint').textContent = '처음 사용합니다. 장부를 보호할 비밀번호를 만들어 주세요. (4자 이상)';
-    $('#pw2Label').classList.remove('hidden');
-    $('#pw2').required = true;
-    $('#pw').setAttribute('autocomplete', 'new-password');
-    $('#loginBtn').textContent = '비밀번호 만들기';
-  } else {
-    $('#loginHint').textContent = '장부를 열려면 비밀번호를 입력하세요.';
+  function setMode(next) {
+    mode = next;
+    const signup = mode === 'signup';
+    $('#tabLogin').classList.toggle('active', !signup);
+    $('#tabSignup').classList.toggle('active', signup);
+    $('#pw2Label').classList.toggle('hidden', !signup);
+    $('#pw2').required = signup;
+    $('#pw').setAttribute('autocomplete', signup ? 'new-password' : 'current-password');
+    $('#loginBtn').textContent = signup ? '가입하고 시작하기' : '로그인';
+    $('#modeHint').innerHTML = signup
+      ? '아이디는 2~20자의 한글·영문·숫자, 비밀번호는 4자 이상입니다.<br>가입 후 관리자 승인을 받으면 이용할 수 있습니다.'
+      : '계정이 없다면 [회원가입]으로 새 장부를 만드세요.<br>계정마다 완전히 분리된 자기 장부를 갖습니다.';
+    $('#loginError').classList.add('hidden');
   }
+  $('#tabLogin').addEventListener('click', () => setMode('login'));
+  $('#tabSignup').addEventListener('click', () => setMode('signup'));
 
   $('#loginForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     const err = $('#loginError');
     err.classList.add('hidden');
-    if (needsSetup && $('#pw').value !== $('#pw2').value) {
+    if (mode === 'signup' && $('#pw').value !== $('#pw2').value) {
       err.textContent = '비밀번호가 서로 다릅니다.';
       err.classList.remove('hidden');
       return;
     }
     try {
-      const res = await fetch(needsSetup ? '/api/auth/setup' : '/api/auth/login', {
+      const res = await fetch(mode === 'signup' ? '/api/auth/signup' : '/api/auth/login', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ password: $('#pw').value }),
+        body: JSON.stringify({ username: $('#username').value.trim(), password: $('#pw').value }),
       });
       const data = await res.json().catch(() => ({}));
       if (res.ok) { location.href = '/'; return; }
-      err.textContent = data.error || '로그인에 실패했습니다.';
+      err.textContent = data.error || (mode === 'signup' ? '가입에 실패했습니다.' : '로그인에 실패했습니다.');
     } catch (e2) {
       err.textContent = '서버에 연결할 수 없습니다.';
     }

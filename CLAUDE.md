@@ -20,18 +20,27 @@ UI 문구, 커밋 메시지, 문서는 모두 한국어를 사용한다.
 
 ## 구조
 
-- `lib/core.js` — 공통 로직: API 라우터, 인증(scrypt+세션 쿠키), 부가세 계산.
-  저장소는 `setStore()`로 주입한다
-- `lib/store-file.js` — 로컬 저장소 (`data/db.json` 파일 하나)
-- `lib/store-pg.js` — Vercel 저장소 (Neon Postgres, `ledger` 테이블에 jsonb 문서 한 건)
+- `lib/core.js` — 공통 로직: API 라우터, 계정 인증(scrypt+세션 쿠키, 회원가입),
+  부가세 계산. 저장소는 `setStore()`로 주입한다
+- `lib/store-file.js` — 로컬 저장소 (`data/db.json` 파일 하나에 users/sessions)
+- `lib/store-pg.js` — Vercel 저장소 (Neon Postgres, `users`·`sessions` 테이블.
+  사용자 레코드는 jsonb 문서 한 건)
 - `server.js` — 로컬 실행기: 정적 파일 서빙 + API 위임
 - `api/index.js` — Vercel 서버리스 진입점 (`vercel.json`이 `/api/*`를 여기로 rewrite)
 - `public/` — 바닐라 JS SPA (`index.html`, `app.js`, `style.css`, `login.html`)
 
 ## 주의사항
 
+- **다중 사용자 + 승인제**: 계정마다 독립된 장부를 갖는다. 사용자 레코드는
+  `{username, salt, hash, createdAt, status, isAdmin, ledger}`, 장부는
+  `{seq, settings, companies, products, transactions}`
+- **첫 가입자 = 관리자(자동 승인)**. 이후 가입자는 `status: 'pending'`으로 시작하며
+  관리자가 `/api/admin/users/:아이디/approve|reject`로 처리한다.
+  승인 전 계정은 장부 API에서 403을 받는다
 - 부가세 계산은 서버(`lib/core.js`)가 최종 권한 — 클라이언트 계산은 미리보기용이며
   두 곳의 `calcItem`을 항상 같게 유지할 것
-- 데이터는 장부 전체가 하나의 JSON 문서다. 스키마를 바꿀 때는 `normalizeDb()`에
-  기본값을 추가해 예전 백업 파일도 읽히게 할 것
+- 장부 스키마를 바꿀 때는 `normalizeLedger()`에 기본값을 추가해
+  예전 백업 파일도 읽히게 할 것
 - 백업/복원(JSON 다운로드·업로드)이 로컬↔Vercel 데이터 이동 통로이므로 이 형식을 깨지 말 것
+- 예전 단일 비밀번호 시절 데이터(`ledger` 테이블 / 예전 형식 db.json)는
+  첫 가입자가 물려받는다 (`takeLegacyLedger`)
