@@ -31,6 +31,10 @@ async function api(method, url, body) {
     headers: body ? { 'Content-Type': 'application/json' } : undefined,
     body: body ? JSON.stringify(body) : undefined,
   });
+  if (res.status === 401 && !url.startsWith('/api/auth/')) {
+    location.href = '/login.html';
+    throw new Error('로그인이 필요합니다.');
+  }
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || '요청에 실패했습니다.');
   return data;
@@ -610,28 +614,63 @@ $('#btnClosePrint').addEventListener('click', () => {
 function renderSettings() {
   const s = state.settings;
   $('#main').innerHTML = `
-    <section class="card narrow">
-      <h2>내 사업자 정보</h2>
-      <p class="hint">거래명세표의 '공급자' 칸에 인쇄되는 정보입니다.</p>
-      <form id="settingsForm">
-        <label>상호명<input name="name" value="${esc(s.name)}"></label>
-        <label>대표자<input name="owner" value="${esc(s.owner)}"></label>
-        <label>사업자등록번호<input name="bizNo" value="${esc(s.bizNo)}" placeholder="000-00-00000"></label>
-        <label>연락처<input name="phone" value="${esc(s.phone)}" inputmode="tel"></label>
-        <label>주소<input name="address" value="${esc(s.address)}"></label>
-        <div class="form-actions">
-          <button type="submit" class="primary">저장</button>
-        </div>
-      </form>
-    </section>`;
+    <div class="stack">
+      <section class="card">
+        <h2>내 사업자 정보</h2>
+        <p class="hint">거래명세표의 '공급자' 칸에 인쇄되는 정보입니다.</p>
+        <form id="settingsForm">
+          <label>상호명<input name="name" value="${esc(s.name)}"></label>
+          <label>대표자<input name="owner" value="${esc(s.owner)}"></label>
+          <label>사업자등록번호<input name="bizNo" value="${esc(s.bizNo)}" placeholder="000-00-00000"></label>
+          <label>연락처<input name="phone" value="${esc(s.phone)}" inputmode="tel"></label>
+          <label>주소<input name="address" value="${esc(s.address)}"></label>
+          <div class="form-actions">
+            <button type="submit" class="primary">저장</button>
+          </div>
+        </form>
+      </section>
+      <section class="card">
+        <h2>비밀번호 변경</h2>
+        <p class="hint">변경하면 다른 기기에서는 다시 로그인해야 합니다.</p>
+        <form id="pwForm">
+          <label>현재 비밀번호<input name="current" type="password" required autocomplete="current-password"></label>
+          <label>새 비밀번호<input name="next" type="password" required minlength="4" autocomplete="new-password"></label>
+          <div class="form-actions">
+            <button type="submit" class="primary">변경</button>
+          </div>
+        </form>
+      </section>
+      <section class="card">
+        <h2>데이터 백업</h2>
+        <p class="hint">모든 장부 데이터가 담긴 파일을 내려받습니다. 안전한 곳에 보관하세요.<br>
+        복원하려면 서버의 <b>data/db.json</b> 자리에 이 파일을 넣고 서버를 재시작하면 됩니다.</p>
+        <a class="btn-link" href="/api/backup" download>💾 백업 파일 다운로드</a>
+      </section>
+    </div>`;
   $('#settingsForm').addEventListener('submit', async (e) => {
     e.preventDefault();
     state.settings = await api('PUT', '/api/settings', Object.fromEntries(new FormData(e.target)));
     toast('내 정보를 저장했습니다.');
   });
+  $('#pwForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      await api('POST', '/api/auth/password', Object.fromEntries(new FormData(e.target)));
+      e.target.reset();
+      toast('비밀번호를 변경했습니다.');
+    } catch (err) {
+      alert(err.message);
+    }
+  });
 }
 
 /* ─────────────── 시작 ─────────────── */
+$('#btnLogout').addEventListener('click', async () => {
+  if (!confirm('로그아웃할까요?')) return;
+  await api('POST', '/api/auth/logout');
+  location.href = '/login.html';
+});
+
 (async function init() {
   const hash = location.hash.slice(1);
   if (['companies', 'products', 'transactions', 'settings'].includes(hash)) {
@@ -639,6 +678,11 @@ function renderSettings() {
     $$('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === hash));
   }
   try {
+    const st = await api('GET', '/api/auth/status');
+    if (!st.authed) {
+      location.href = '/login.html';
+      return;
+    }
     state.settings = await api('GET', '/api/settings');
     await refreshCompanies();
   } catch (e) {

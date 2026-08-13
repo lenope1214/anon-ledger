@@ -9,6 +9,7 @@ const http = require('http');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
@@ -29,6 +30,7 @@ const MIME = {
 function emptyDb() {
   return {
     seq: 1,
+    auth: null, // { salt, hash, sessions: { 토큰해시: 만료시각(ms) } }
     settings: { name: '', owner: '', bizNo: '', phone: '', address: '' },
     companies: [],
     products: [],
@@ -105,6 +107,121 @@ function buildTransaction(body, id) {
   };
 }
 
+/* ─────────────── 인증 ─────────────── */
+const SESSION_DAYS = 30;
+const loginFails = new Map(); // ip → { count, until }
+
+function clientIp(req) {
+  const fwd = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+  return fwd || req.socket.remoteAddress || '';
+}
+
+function parseCookies(req) {
+  const out = {};
+  for (const part of String(req.headers.cookie || '').split(';')) {
+    const i = part.indexOf('=');
+    if (i > 0) out[part.slice(0, i).trim()] = part.slice(i + 1).trim();
+  }
+  return out;
+}
+
+const tokenHash = (t) => crypto.createHash('sha256').update(t).digest('hex');
+const hashPassword = (pw, saltHex) => crypto.scryptSync(pw, Buffer.from(saltHex, 'hex'), 64).toString('hex');
+
+function verifyPassword(pw) {
+  const h = crypto.scryptSync(pw, Buffer.from(db.auth.salt, 'hex'), 64);
+  return crypto.timingSafeEqual(h, Buffer.from(db.auth.hash, 'hex'));
+}
+
+function pruneSessions() {
+  if (!db.auth) return;
+  const now = Date.now();
+  for (const [k, exp] of Object.entries(db.auth.sessions)) {
+    if (!(typeof exp === 'number' && exp > now)) delete db.auth.sessions[k];
+  }
+}
+
+function isAuthed(req) {
+  if (!db.auth) return false; // 비밀번호를 설정하기 전에는 어떤 API도 열지 않음
+  const t = parseCookies(req).session;
+  if (!t) return false;
+  const exp = db.auth.sessions[tokenHash(t)];
+  return typeof exp === 'number' && exp > Date.now();
+}
+
+function issueSession(req, res) {
+  const token = crypto.randomBytes(32).toString('hex');
+  pruneSessions();
+  db.auth.sessions[tokenHash(token)] = Date.now() + SESSION_DAYS * 24 * 60 * 60 * 1000;
+  saveDb();
+  const secure = req.headers['x-forwarded-proto'] === 'https' ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `session=${token}; HttpOnly; SameSite=Lax; Path=/; Max-Age=${SESSION_DAYS * 24 * 60 * 60}${secure}`);
+}
+
+async function handleAuth(req, res, p, m) {
+  if (p === '/api/auth/status' && m === 'GET') {
+    return sendJson(res, 200, { needsSetup: !db.auth, authed: isAuthed(req) });
+  }
+
+  if (p === '/api/auth/setup' && m === 'POST') {
+    if (db.auth) return sendJson(res, 400, { error: '이미 비밀번호가 설정되어 있습니다.' });
+    const b = await readBody(req);
+    const pw = String(b.password || '');
+    if (pw.length < 4) return sendJson(res, 400, { error: '비밀번호는 4자 이상으로 정하세요.' });
+    const salt = crypto.randomBytes(16).toString('hex');
+    db.auth = { salt, hash: hashPassword(pw, salt), sessions: {} };
+    issueSession(req, res);
+    return sendJson(res, 200, { ok: true });
+  }
+
+  if (p === '/api/auth/login' && m === 'POST') {
+    if (!db.auth) return sendJson(res, 400, { error: '먼저 비밀번호를 설정하세요.' });
+    const ip = clientIp(req);
+    const fail = loginFails.get(ip);
+    if (fail && fail.until > Date.now()) {
+      return sendJson(res, 429, { error: '로그인 시도가 너무 많습니다. 10분 뒤 다시 시도하세요.' });
+    }
+    const b = await readBody(req);
+    if (!verifyPassword(String(b.password || ''))) {
+      const f = fail || { count: 0, until: 0 };
+      f.count++;
+      if (f.count >= 8) {
+        f.until = Date.now() + 10 * 60 * 1000;
+        f.count = 0;
+      }
+      loginFails.set(ip, f);
+      return sendJson(res, 401, { error: '비밀번호가 올바르지 않습니다.' });
+    }
+    loginFails.delete(ip);
+    issueSession(req, res);
+    return sendJson(res, 200, { ok: true });
+  }
+
+  if (p === '/api/auth/logout' && m === 'POST') {
+    const t = parseCookies(req).session;
+    if (db.auth && t) {
+      delete db.auth.sessions[tokenHash(t)];
+      saveDb();
+    }
+    res.setHeader('Set-Cookie', 'session=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0');
+    return sendJson(res, 200, { ok: true });
+  }
+
+  if (p === '/api/auth/password' && m === 'POST') {
+    if (!isAuthed(req)) return sendJson(res, 401, { error: '로그인이 필요합니다.' });
+    const b = await readBody(req);
+    if (!verifyPassword(String(b.current || ''))) return sendJson(res, 400, { error: '현재 비밀번호가 올바르지 않습니다.' });
+    const pw = String(b.next || '');
+    if (pw.length < 4) return sendJson(res, 400, { error: '새 비밀번호는 4자 이상으로 정하세요.' });
+    const salt = crypto.randomBytes(16).toString('hex');
+    db.auth = { salt, hash: hashPassword(pw, salt), sessions: {} }; // 다른 기기는 모두 로그아웃됨
+    issueSession(req, res);
+    return sendJson(res, 200, { ok: true });
+  }
+
+  return sendJson(res, 404, { error: '알 수 없는 API 경로입니다.' });
+}
+
 function sendJson(res, code, obj) {
   const buf = Buffer.from(JSON.stringify(obj));
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8', 'Content-Length': buf.length });
@@ -139,6 +256,22 @@ async function handleApi(req, res, url) {
     const r = p.match(re);
     return r ? Number(r[1]) : null;
   };
+
+  // ── 인증 (로그인 없이 접근 가능한 유일한 API) ──
+  if (p.startsWith('/api/auth/')) return handleAuth(req, res, p, m);
+  if (!isAuthed(req)) return sendJson(res, 401, { error: '로그인이 필요합니다.' });
+
+  // ── 백업 다운로드 ──
+  if (p === '/api/backup' && m === 'GET') {
+    const copy = Object.assign({}, db, { auth: db.auth ? { salt: db.auth.salt, hash: db.auth.hash, sessions: {} } : null });
+    const buf = Buffer.from(JSON.stringify(copy, null, 2));
+    res.writeHead(200, {
+      'Content-Type': 'application/json; charset=utf-8',
+      'Content-Disposition': `attachment; filename="ledger-backup-${new Date().toISOString().slice(0, 10)}.json"`,
+      'Content-Length': buf.length,
+    });
+    return res.end(buf);
+  }
 
   // ── 내 사업자 정보 ──
   if (p === '/api/settings' && m === 'GET') return sendJson(res, 200, db.settings);

@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>로그인 — 거래장부</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📒</text></svg>">
+<link rel="stylesheet" href="style.css">
+</head>
+<body class="login-body">
+<div class="card login-card">
+  <h1 class="login-title">📒 거래장부</h1>
+  <p id="loginHint" class="hint"></p>
+  <form id="loginForm">
+    <label>비밀번호<input id="pw" type="password" required minlength="4" autocomplete="current-password"></label>
+    <label id="pw2Label" class="hidden">비밀번호 확인<input id="pw2" type="password" autocomplete="new-password"></label>
+    <p id="loginError" class="login-error hidden"></p>
+    <button type="submit" class="primary login-btn" id="loginBtn">로그인</button>
+  </form>
+</div>
+<script>
+(async () => {
+  const $ = (s) => document.querySelector(s);
+  let needsSetup = false;
+  try {
+    const st = await fetch('/api/auth/status').then((r) => r.json());
+    if (st.authed) { location.href = '/'; return; }
+    needsSetup = st.needsSetup;
+  } catch (e) { /* 서버 연결 실패 시 로그인 시도에서 안내됨 */ }
+
+  if (needsSetup) {
+    $('#loginHint').textContent = '처음 사용합니다. 장부를 보호할 비밀번호를 만들어 주세요. (4자 이상)';
+    $('#pw2Label').classList.remove('hidden');
+    $('#pw2').required = true;
+    $('#pw').setAttribute('autocomplete', 'new-password');
+    $('#loginBtn').textContent = '비밀번호 만들기';
+  } else {
+    $('#loginHint').textContent = '장부를 열려면 비밀번호를 입력하세요.';
+  }
+
+  $('#loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const err = $('#loginError');
+    err.classList.add('hidden');
+    if (needsSetup && $('#pw').value !== $('#pw2').value) {
+      err.textContent = '비밀번호가 서로 다릅니다.';
+      err.classList.remove('hidden');
+      return;
+    }
+    try {
+      const res = await fetch(needsSetup ? '/api/auth/setup' : '/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ password: $('#pw').value }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) { location.href = '/'; return; }
+      err.textContent = data.error || '로그인에 실패했습니다.';
+    } catch (e2) {
+      err.textContent = '서버에 연결할 수 없습니다.';
+    }
+    err.classList.remove('hidden');
+  });
+})();
+</script>
+</body>
+</html>

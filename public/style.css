@@ -32,7 +32,15 @@ body {
   z-index: 10;
 }
 
-#topbar h1 { font-size: 1.15rem; padding-bottom: 0.5rem; }
+.topbar-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 0.5rem;
+}
+
+#topbar h1 { font-size: 1.15rem; }
+#btnLogout { font-size: 0.8rem; padding: 0.3rem 0.7rem; color: var(--sub); }
 
 #tabs {
   display: flex;
@@ -177,6 +185,39 @@ form label input, form label select { margin-top: 0.2rem; font-weight: 400; }
 .items-table .i-del { border: none; color: var(--danger); background: none; font-size: 1rem; }
 .totals { text-align: right; margin: 0.75rem 0; font-size: 0.95rem; }
 #btnAddItem { margin-top: 0.5rem; }
+
+/* ─────────────── 로그인 / 설정 ─────────────── */
+.login-body {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+}
+
+.login-card { width: 100%; max-width: 360px; }
+.login-title { font-size: 1.3rem; text-align: center; margin-bottom: 0.5rem; }
+.login-btn { width: 100%; padding: 0.6rem; margin-top: 0.25rem; }
+.login-error { color: var(--danger); font-size: 0.85rem; margin-bottom: 0.5rem; }
+
+.stack {
+  display: grid;
+  gap: 1rem;
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.btn-link {
+  display: inline-block;
+  font-size: 0.88rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.45rem 0.8rem;
+  color: var(--text);
+  text-decoration: none;
+}
+
+.btn-link:hover { background: #f1f5f9; }
 
 /* ─────────────── 토스트 ─────────────── */
 #toast {
