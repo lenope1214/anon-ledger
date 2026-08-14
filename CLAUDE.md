@@ -10,8 +10,10 @@ UI 문구, 커밋 메시지, 문서는 모두 한국어를 사용한다.
 - `staging` — develop과 production 사이 중간 검증이 필요할 때만 사용
 - 흐름: `feat/*` → `develop` → (`staging` →) `production`
 - 작업이 끝나면 **PR 없이** 위 순서대로 직접 머지하고 푸시한다.
-- Vercel이 `main`을 운영 브랜치로 보는 설정일 수 있으므로, `production` 머지 후
-  `main`도 production과 동기화해 푸시한다.
+- `main` 브랜치는 삭제되었다. 다시 만들거나 푸시하지 말 것
+  (Vercel Production Branch는 `production`).
+- DB는 환경별로 분리되어 있다: Production은 Neon 기본 브랜치,
+  Preview(develop)는 Neon `dev` 브랜치의 DATABASE_URL을 사용한다.
 
 ## 실행과 검증
 
