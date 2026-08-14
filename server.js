@@ -18,7 +18,15 @@ const HOST = process.env.HOST || '0.0.0.0';
 const DATA_DIR = path.join(__dirname, 'data');
 const PUBLIC_DIR = path.join(__dirname, 'public');
 
-core.setStore(createFileStore(DATA_DIR, core.normalizeLedger));
+// DB 환경변수가 있으면 Neon Postgres, 없으면 로컬 파일에 저장한다.
+// (Vercel이 이 파일을 통째로 실행하는 배포 방식이어도 DB를 쓰도록)
+const hasDb = Boolean(process.env.DATABASE_URL || process.env.POSTGRES_URL);
+const onVercel = process.env.VERCEL === '1';
+if (hasDb) {
+  core.setStore(require('./lib/store-pg')(core.normalizeLedger));
+} else {
+  core.setStore(createFileStore(DATA_DIR, core.normalizeLedger));
+}
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -54,6 +62,11 @@ function serveStatic(req, res, p) {
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (url.pathname.startsWith('/api/')) {
+    if (onVercel && !hasDb) {
+      return core.sendJson(res, 500, {
+        error: '데이터베이스가 연결되지 않았습니다. Vercel 프로젝트의 Storage 탭에서 Neon(Postgres)을 만들어 연결한 뒤 다시 배포하세요.',
+      });
+    }
     core.handleApi(req, res, url).catch((e) => core.sendJson(res, 500, { error: (e && e.message) || '서버 오류' }));
     return;
   }
@@ -62,6 +75,7 @@ const server = http.createServer((req, res) => {
 
 server.listen(PORT, HOST, () => {
   console.log('📒 거래장부 서버가 시작되었습니다.');
+  console.log(`  저장소: ${hasDb ? 'Neon Postgres (DATABASE_URL)' : '로컬 파일 (data/db.json)'}`);
   console.log(`  이 컴퓨터에서:  http://localhost:${PORT}`);
   for (const ifaces of Object.values(os.networkInterfaces())) {
     for (const i of ifaces || []) {
