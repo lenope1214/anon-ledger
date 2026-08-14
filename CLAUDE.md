@@ -48,3 +48,16 @@ UI 문구, 커밋 메시지, 문서는 모두 한국어를 사용한다.
 - 백업/복원(JSON 다운로드·업로드)이 로컬↔Vercel 데이터 이동 통로이므로 이 형식을 깨지 말 것
 - 예전 단일 비밀번호 시절 데이터(`ledger` 테이블 / 예전 형식 db.json)는
   첫 가입자가 물려받는다 (`takeLegacyLedger`)
+
+## 진행 상태 (2026-08-14 기준)
+
+- **완료**: 상호/제품/거래 관리, 거래명세표 인쇄, 부가세 3모드, 미수금 집계,
+  백업/복원, 회원가입+관리자 승인제(첫 가입자=관리자), Vercel 배포
+  (운영 https://ledger.anon-chat.kr 정상 동작, 관리자 계정 생성 완료)
+- **사용자(소유자)가 진행 중**: dev-ledger.anon-chat.kr 도메인 연결(Vercel Domains에서
+  Git Branch=develop 지정 + Cloudflare CNAME), Neon `dev` 브랜치 생성 후
+  Vercel Preview 환경 전용 DATABASE_URL 등록 — 완료 여부는 사용자에게 확인할 것
+- **다음 작업 후보** (사용자 요청 시): 거래 목록 월별/기간 조회, 상호별 거래 합계표,
+  거래명세표 양식 조정 등
+- Vercel은 package.json의 start 스크립트로 server.js를 직접 실행하는 방식으로
+  배포된다 — server.js도 DATABASE_URL이 있으면 Neon을 쓰는 이유
