@@ -5,11 +5,13 @@ UI 문구, 커밋 메시지, 문서는 모두 한국어를 사용한다.
 
 ## 브랜치 전략 (중요: PR을 만들지 않는다)
 
-- `production` — 운영 브랜치 (Vercel 프로덕션 배포 대상)
-- `develop` — 개발 브랜치. 모든 작업의 기본 베이스
+- `production` — 운영 브랜치 (Vercel 프로덕션 배포 → https://ledger.anon-chat.kr)
+- `develop` — 개발 브랜치. 모든 작업의 기본 베이스 (Vercel 프리뷰 → https://dev-ledger.anon-chat.kr)
 - `staging` — develop과 production 사이 중간 검증이 필요할 때만 사용
 - 흐름: `feat/*` → `develop` → (`staging` →) `production`
 - 작업이 끝나면 **PR 없이** 위 순서대로 직접 머지하고 푸시한다.
+- Vercel이 `main`을 운영 브랜치로 보는 설정일 수 있으므로, `production` 머지 후
+  `main`도 production과 동기화해 푸시한다.
 
 ## 실행과 검증
 
