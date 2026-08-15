@@ -178,6 +178,41 @@ form label input, form label select { margin-top: 0.2rem; font-weight: 400; }
 .modal-box.wide { max-width: 880px; }
 .modal-box h2 { font-size: 1.05rem; margin-bottom: 0.9rem; }
 
+/* 장부 시트 빠른 입력 행 */
+.entry-row td { background: #eff6ff; padding: 0.35rem 0.25rem; }
+.entry-row input, .entry-row select { padding: 0.4rem 0.5rem; font-size: 0.88rem; }
+.entry-row #eDate { min-width: 8.4rem; }
+.entry-row #eCompany { min-width: 7rem; }
+.entry-row #eName { min-width: 8.5rem; }
+.entry-row #eSpec { min-width: 5.5rem; }
+.entry-row #eQty { min-width: 4rem; }
+.entry-row #ePrice, .entry-row #ePaid { min-width: 5.8rem; }
+.section-head .vat-select { flex: 0 1 auto; width: auto; }
+.ledger-table td .sub { display: inline; }
+
+/* 품명 자동완성 힌트 */
+.ac-box {
+  position: fixed;
+  z-index: 70;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+  min-width: 250px;
+  max-height: 15rem;
+  overflow-y: auto;
+}
+.ac-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.45rem 0.7rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ac-item.sel, .ac-item:hover { background: #eff6ff; }
+.ac-item .ac-price { margin-left: auto; color: var(--sub); font-size: 0.82rem; }
+
 /* 거래 품목 입력 표 */
 .items-table input { min-width: 6.5rem; padding: 0.4rem 0.5rem; }
 .items-table .i-qty { min-width: 4.5rem; }
