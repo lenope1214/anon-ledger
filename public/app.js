@@ -336,9 +336,13 @@ function clearProductsCache() {
   state.productsCache = {};
 }
 
-// 품명 입력칸에 자동완성 힌트를 붙인다. 선택하면 onPick(제품)이 호출된다.
+// 입력칸에 검색 힌트 드롭다운을 붙인다 (품명·상호 공용).
 // 힌트 상자는 표의 스크롤 영역에 잘리지 않도록 body에 fixed로 띄운다.
-function attachAutocomplete(input, getCompanyId, onPick) {
+// opts: { getItems(질의어)→항목배열, itemHtml(항목)→HTML, onPick(항목),
+//         minChars(기본 1, 0이면 포커스만 해도 전체 목록 표시),
+//         enterPicksFirst(기본 false, true면 Enter로 첫 힌트 선택) }
+function attachSearchDropdown(input, opts) {
+  const minChars = opts.minChars == null ? 1 : opts.minChars;
   let box = null;
   let items = [];
   let sel = -1;
@@ -370,12 +374,7 @@ function attachAutocomplete(input, getCompanyId, onPick) {
     }
     position();
     box.innerHTML = items
-      .map(
-        (p, i) => `<div class="ac-item ${i === sel ? 'sel' : ''}" data-i="${i}">
-          <b>${esc(p.name)}</b>${p.spec ? `<span class="sub">${esc(p.spec)}</span>` : ''}
-          <span class="ac-price">${won(p.price)}원</span>
-        </div>`
-      )
+      .map((it, i) => `<div class="ac-item ${i === sel ? 'sel' : ''}" data-i="${i}">${opts.itemHtml(it)}</div>`)
       .join('');
     box.querySelectorAll('.ac-item').forEach((el) => {
       el.addEventListener('mousedown', (e) => {
@@ -385,26 +384,27 @@ function attachAutocomplete(input, getCompanyId, onPick) {
     });
   }
   function pick(i) {
-    const p = items[i];
+    const it = items[i];
     close();
-    if (p) onPick(p);
+    if (it) opts.onPick(it);
   }
-
-  input.addEventListener('input', async () => {
-    const cid = Number(getCompanyId());
+  async function update() {
     const q = input.value.trim().toLowerCase();
-    if (!cid || !q) return close();
+    if (q.length < minChars) return close();
     let list = [];
     try {
-      list = await getProducts(cid);
+      list = await opts.getItems(q);
     } catch (e) {
       return close();
     }
-    items = list.filter((p) => p.name.toLowerCase().includes(q)).slice(0, 8);
+    items = list.slice(0, 8);
     sel = -1;
     if (!items.length) return close();
     renderBox();
-  });
+  }
+
+  input.addEventListener('input', update);
+  if (minChars === 0) input.addEventListener('focus', update);
   input.addEventListener('keydown', (e) => {
     if (!box) return;
     if (e.key === 'ArrowDown') {
@@ -416,10 +416,10 @@ function attachAutocomplete(input, getCompanyId, onPick) {
       sel = (sel - 1 + items.length) % items.length;
       renderBox();
     } else if (e.key === 'Enter') {
-      if (sel >= 0) {
+      if (sel >= 0 || opts.enterPicksFirst) {
         e.preventDefault();
         e.stopPropagation();
-        pick(sel);
+        pick(sel >= 0 ? sel : 0);
       } else {
         close(); // 힌트를 고르지 않았으면 입력한 그대로 저장 진행
       }
@@ -429,6 +429,19 @@ function attachAutocomplete(input, getCompanyId, onPick) {
   });
   input.addEventListener('blur', () => setTimeout(close, 150));
   window.addEventListener('scroll', close, { capture: true, passive: true });
+}
+
+// 품명 자동완성: 해당 상호의 제품에서 검색
+function attachProductAutocomplete(input, getCompanyId, onPick) {
+  attachSearchDropdown(input, {
+    getItems: async (q) => {
+      const cid = Number(getCompanyId());
+      if (!cid) return [];
+      return (await getProducts(cid)).filter((p) => p.name.toLowerCase().includes(q));
+    },
+    itemHtml: (p) => `<b>${esc(p.name)}</b>${p.spec ? `<span class="sub">${esc(p.spec)}</span>` : ''}<span class="ac-price">${won(p.price)}원</span>`,
+    onPick,
+  });
 }
 
 /* ─────────────── 거래관리 (장부 시트) ─────────────── */
@@ -462,7 +475,7 @@ async function renderTransactions() {
           <tbody>
             <tr class="entry-row">
               <td><input type="date" id="eDate" value="${esc(state.entryDate || today())}"></td>
-              <td><select id="eCompany">${state.companies.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></td>
+              <td><input id="eCompany" placeholder="상호 검색" autocomplete="off"></td>
               <td><input id="eName" placeholder="품명 입력" autocomplete="off"></td>
               <td><input id="eSpec" placeholder="규격"></td>
               <td><input id="eQty" type="number" inputmode="decimal" step="any" min="0" value="1"></td>
@@ -482,15 +495,40 @@ async function renderTransactions() {
     </section>`;
 
   const eCompany = $('#eCompany');
-  const preferred = state.txCompanyId || state.entryCompanyId;
-  if (preferred && state.companies.some((c) => String(c.id) === String(preferred))) eCompany.value = String(preferred);
+
+  // 입력 행의 상호를 설정한다 (설정하면 다음 입력에도 계속 유지, 새로고침 시 초기화)
+  function setEntryCompany(c) {
+    state.entryCompanyId = String(c.id);
+    eCompany.value = c.name;
+  }
+  const preferred = state.companies.find((c) => String(c.id) === String(state.txCompanyId || state.entryCompanyId));
+  if (preferred) setEntryCompany(preferred);
+  else state.entryCompanyId = '';
+
+  attachSearchDropdown(eCompany, {
+    minChars: 0,           // 클릭만 해도 전체 상호 목록이 뜨고, 타자로 좁혀진다
+    enterPicksFirst: true, // Enter로 맨 위 힌트 바로 선택
+    getItems: async (q) => state.companies.filter((c) => !q || c.name.toLowerCase().includes(q)),
+    itemHtml: (c) => `<b>${esc(c.name)}</b>${c.owner ? `<span class="sub">${esc(c.owner)}</span>` : ''}`,
+    onPick: (c) => {
+      setEntryCompany(c);
+      $('#eName').focus();
+    },
+  });
+  eCompany.addEventListener('input', () => {
+    state.entryCompanyId = ''; // 글자를 고치면 다시 선택해야 함
+  });
+  eCompany.addEventListener('blur', () => {
+    // 이름을 끝까지 정확히 입력한 경우는 자동 인정
+    if (state.entryCompanyId) return;
+    const m = state.companies.find((c) => c.name.toLowerCase() === eCompany.value.trim().toLowerCase());
+    if (m) setEntryCompany(m);
+  });
 
   $('#txCompany').addEventListener('change', (e) => {
     state.txCompanyId = e.target.value;
-    if (e.target.value) {
-      eCompany.value = e.target.value;
-      state.entryCompanyId = e.target.value;
-    }
+    const c = state.companies.find((x) => String(x.id) === e.target.value);
+    if (c) setEntryCompany(c);
     drawTxRows();
   });
   $('#entryVat').addEventListener('change', (e) => {
@@ -500,13 +538,10 @@ async function renderTransactions() {
     } catch (err) { /* 무시 */ }
     recomputeEntry();
   });
-  eCompany.addEventListener('change', (e) => {
-    state.entryCompanyId = e.target.value;
-  });
   $('#btnAddTx').addEventListener('click', () => openTxForm(null));
   $('#eQty').addEventListener('input', recomputeEntry);
   $('#ePrice').addEventListener('input', recomputeEntry);
-  attachAutocomplete($('#eName'), () => eCompany.value, (p) => {
+  attachProductAutocomplete($('#eName'), () => state.entryCompanyId, (p) => {
     $('#eName').value = p.name;
     $('#eSpec').value = p.spec;
     $('#ePrice').value = p.price;
@@ -535,6 +570,11 @@ function recomputeEntry() {
 }
 
 async function saveEntry() {
+  if (!state.entryCompanyId) {
+    toast('상호를 검색해 선택하세요.');
+    $('#eCompany').focus();
+    return;
+  }
   const name = $('#eName').value.trim();
   if (!name) {
     toast('품명을 입력하세요.');
@@ -542,7 +582,7 @@ async function saveEntry() {
     return;
   }
   const body = {
-    companyId: Number($('#eCompany').value),
+    companyId: Number(state.entryCompanyId),
     date: $('#eDate').value || today(),
     vatMode: state.entryVat,
     items: [{ name, spec: $('#eSpec').value.trim(), qty: Number($('#eQty').value) || 0, price: Number($('#ePrice').value) || 0 }],
@@ -680,7 +720,7 @@ async function openTxForm(tx) {
       <td><input class="i-price" type="number" inputmode="numeric" min="0" value="${item ? item.price : 0}"></td>
       <td class="num i-amount">0</td>
       <td><button type="button" class="i-del" title="품목 삭제">✕</button></td>`;
-    attachAutocomplete($('.i-name', tr), () => form.companyId.value, (p) => {
+    attachProductAutocomplete($('.i-name', tr), () => form.companyId.value, (p) => {
       $('.i-name', tr).value = p.name;
       $('.i-spec', tr).value = p.spec;
       $('.i-price', tr).value = p.price;
