@@ -12,7 +12,15 @@ const state = {
   companySearch: '',
   productCompanyId: '', // 제품관리 탭에서 선택된 상호
   txCompanyId: '',      // 거래관리 탭 필터 ('' = 전체)
+  productsCache: {},    // 자동완성용 상호별 제품 캐시
+  entryVat: 'separate', // 빠른 입력 행의 부가세 방식
+  entryDate: '',        // 빠른 입력 행에서 마지막으로 쓴 날짜
+  entryCompanyId: '',   // 빠른 입력 행에서 마지막으로 쓴 상호
 };
+try {
+  const savedVat = localStorage.getItem('entryVat');
+  if (savedVat && ['separate', 'included', 'none'].includes(savedVat)) state.entryVat = savedVat;
+} catch (e) { /* localStorage 사용 불가 환경 */ }
 
 const VAT_LABEL = { separate: '부가세 별도', included: '부가세 포함', none: '부가세 없음' };
 
@@ -278,6 +286,7 @@ async function drawProductRows() {
     else if (btn.dataset.act === 'del') {
       if (!confirm(`'${p.name}' 제품을 삭제할까요?`)) return;
       await api('DELETE', '/api/products/' + id);
+      clearProductsCache();
       toast('제품을 삭제했습니다.');
       drawProductRows();
     }
@@ -306,6 +315,7 @@ function openProductForm(p) {
     try {
       if (p) await api('PUT', '/api/products/' + p.id, body);
       else await api('POST', '/api/products', body);
+      clearProductsCache();
       closeModal();
       toast('저장했습니다.');
       drawProductRows();
@@ -315,12 +325,123 @@ function openProductForm(p) {
   });
 }
 
-/* ─────────────── 거래관리 ─────────────── */
+/* ─────────────── 제품 자동완성 ─────────────── */
+async function getProducts(companyId) {
+  if (!state.productsCache[companyId]) {
+    state.productsCache[companyId] = await api('GET', '/api/products?companyId=' + companyId);
+  }
+  return state.productsCache[companyId];
+}
+function clearProductsCache() {
+  state.productsCache = {};
+}
+
+// 품명 입력칸에 자동완성 힌트를 붙인다. 선택하면 onPick(제품)이 호출된다.
+// 힌트 상자는 표의 스크롤 영역에 잘리지 않도록 body에 fixed로 띄운다.
+function attachAutocomplete(input, getCompanyId, onPick) {
+  let box = null;
+  let items = [];
+  let sel = -1;
+
+  function close() {
+    if (box) box.remove();
+    box = null;
+    items = [];
+    sel = -1;
+  }
+  function position() {
+    const r = input.getBoundingClientRect();
+    box.style.left = r.left + 'px';
+    box.style.minWidth = Math.max(250, r.width) + 'px';
+    const spaceBelow = window.innerHeight - r.bottom;
+    if (spaceBelow < 260 && r.top > 260) {
+      box.style.top = 'auto';
+      box.style.bottom = window.innerHeight - r.top + 2 + 'px';
+    } else {
+      box.style.bottom = 'auto';
+      box.style.top = r.bottom + 2 + 'px';
+    }
+  }
+  function renderBox() {
+    if (!box) {
+      box = document.createElement('div');
+      box.className = 'ac-box';
+      document.body.appendChild(box);
+    }
+    position();
+    box.innerHTML = items
+      .map(
+        (p, i) => `<div class="ac-item ${i === sel ? 'sel' : ''}" data-i="${i}">
+          <b>${esc(p.name)}</b>${p.spec ? `<span class="sub">${esc(p.spec)}</span>` : ''}
+          <span class="ac-price">${won(p.price)}원</span>
+        </div>`
+      )
+      .join('');
+    box.querySelectorAll('.ac-item').forEach((el) => {
+      el.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        pick(Number(el.dataset.i));
+      });
+    });
+  }
+  function pick(i) {
+    const p = items[i];
+    close();
+    if (p) onPick(p);
+  }
+
+  input.addEventListener('input', async () => {
+    const cid = Number(getCompanyId());
+    const q = input.value.trim().toLowerCase();
+    if (!cid || !q) return close();
+    let list = [];
+    try {
+      list = await getProducts(cid);
+    } catch (e) {
+      return close();
+    }
+    items = list.filter((p) => p.name.toLowerCase().includes(q)).slice(0, 8);
+    sel = -1;
+    if (!items.length) return close();
+    renderBox();
+  });
+  input.addEventListener('keydown', (e) => {
+    if (!box) return;
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      sel = (sel + 1) % items.length;
+      renderBox();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      sel = (sel - 1 + items.length) % items.length;
+      renderBox();
+    } else if (e.key === 'Enter') {
+      if (sel >= 0) {
+        e.preventDefault();
+        e.stopPropagation();
+        pick(sel);
+      } else {
+        close(); // 힌트를 고르지 않았으면 입력한 그대로 저장 진행
+      }
+    } else if (e.key === 'Escape') {
+      close();
+    }
+  });
+  input.addEventListener('blur', () => setTimeout(close, 150));
+  window.addEventListener('scroll', close, { capture: true, passive: true });
+}
+
+/* ─────────────── 거래관리 (장부 시트) ─────────────── */
 let txCache = [];
 
 async function renderTransactions() {
   await refreshCompanies();
   const main = $('#main');
+  if (!state.companies.length) {
+    main.innerHTML = `<section class="card">${emptyNotice('거래를 입력하려면 먼저 상호를 등록해야 합니다.', '상호관리로 이동', 'companies')}</section>`;
+    bindGoto(main);
+    return;
+  }
   main.innerHTML = `
     <section class="card">
       <div class="section-head">
@@ -328,22 +449,124 @@ async function renderTransactions() {
           <option value="">전체 상호</option>
           ${state.companies.map((c) => `<option value="${c.id}" ${String(c.id) === state.txCompanyId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
         </select>
-        <button class="primary" id="btnAddTx">＋ 새 거래</button>
+        <select id="entryVat" class="vat-select" title="빠른 입력 부가세 방식">
+          ${Object.entries(VAT_LABEL).map(([v, l]) => `<option value="${v}" ${v === state.entryVat ? 'selected' : ''}>${l}</option>`).join('')}
+        </select>
+        <button id="btnAddTx">＋ 여러 품목 거래</button>
       </div>
       <p id="txSummary" class="summary"></p>
       <div class="table-wrap">
-        <table>
-          <thead><tr><th>날짜</th><th>상호</th><th>품목</th><th class="num">공급가액</th><th class="num">세액</th><th class="num">합계</th><th class="num">입금</th><th class="num">잔액</th><th class="actions"></th></tr></thead>
+        <table class="ledger-table">
+          <thead><tr><th>날짜</th><th>상호</th><th>품명</th><th>규격</th><th class="num">수량</th><th class="num">단가</th><th class="num">공급가액</th><th class="num">세액</th><th class="num">합계</th><th class="num">입금</th><th class="num">잔액</th><th class="actions"></th></tr></thead>
           <tbody id="txRows"></tbody>
+          <tbody>
+            <tr class="entry-row">
+              <td><input type="date" id="eDate" value="${esc(state.entryDate || today())}"></td>
+              <td><select id="eCompany">${state.companies.map((c) => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></td>
+              <td><input id="eName" placeholder="품명 입력" autocomplete="off"></td>
+              <td><input id="eSpec" placeholder="규격"></td>
+              <td><input id="eQty" type="number" inputmode="decimal" step="any" min="0" value="1"></td>
+              <td><input id="ePrice" type="number" inputmode="numeric" min="0" placeholder="단가"></td>
+              <td class="num" id="eSupply">0</td>
+              <td class="num" id="eTax">0</td>
+              <td class="num" id="eTotal">0</td>
+              <td><input id="ePaid" type="number" inputmode="numeric" min="0" placeholder="0"></td>
+              <td class="num">—</td>
+              <td class="actions"><button class="primary" id="btnEntrySave">저장</button></td>
+            </tr>
+          </tbody>
         </table>
       </div>
+      <p class="hint">맨 아래 파란 행에 적고 Enter(또는 저장)를 누르면 바로 기록됩니다.
+      품명을 입력하면 등록된 제품이 힌트로 나타나며, 적은 품명·규격·단가는 제품관리에 자동 등록됩니다.</p>
     </section>`;
+
+  const eCompany = $('#eCompany');
+  const preferred = state.txCompanyId || state.entryCompanyId;
+  if (preferred && state.companies.some((c) => String(c.id) === String(preferred))) eCompany.value = String(preferred);
+
   $('#txCompany').addEventListener('change', (e) => {
     state.txCompanyId = e.target.value;
+    if (e.target.value) {
+      eCompany.value = e.target.value;
+      state.entryCompanyId = e.target.value;
+    }
     drawTxRows();
   });
+  $('#entryVat').addEventListener('change', (e) => {
+    state.entryVat = e.target.value;
+    try {
+      localStorage.setItem('entryVat', e.target.value);
+    } catch (err) { /* 무시 */ }
+    recomputeEntry();
+  });
+  eCompany.addEventListener('change', (e) => {
+    state.entryCompanyId = e.target.value;
+  });
   $('#btnAddTx').addEventListener('click', () => openTxForm(null));
-  drawTxRows();
+  $('#eQty').addEventListener('input', recomputeEntry);
+  $('#ePrice').addEventListener('input', recomputeEntry);
+  attachAutocomplete($('#eName'), () => eCompany.value, (p) => {
+    $('#eName').value = p.name;
+    $('#eSpec').value = p.spec;
+    $('#ePrice').value = p.price;
+    recomputeEntry();
+    $('#eQty').focus();
+    $('#eQty').select();
+  });
+  $('#btnEntrySave').addEventListener('click', saveEntry);
+  $('.entry-row').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && e.target.tagName === 'INPUT') {
+      e.preventDefault();
+      saveEntry();
+    }
+  });
+  recomputeEntry();
+  await drawTxRows();
+  window.scrollTo({ top: document.body.scrollHeight });
+}
+
+function recomputeEntry() {
+  if (!$('#eQty')) return;
+  const r = calcItem(Number($('#eQty').value) || 0, Number($('#ePrice').value) || 0, state.entryVat);
+  $('#eSupply').textContent = won(r.supply);
+  $('#eTax').textContent = won(r.tax);
+  $('#eTotal').textContent = won(r.supply + r.tax);
+}
+
+async function saveEntry() {
+  const name = $('#eName').value.trim();
+  if (!name) {
+    toast('품명을 입력하세요.');
+    $('#eName').focus();
+    return;
+  }
+  const body = {
+    companyId: Number($('#eCompany').value),
+    date: $('#eDate').value || today(),
+    vatMode: state.entryVat,
+    items: [{ name, spec: $('#eSpec').value.trim(), qty: Number($('#eQty').value) || 0, price: Number($('#ePrice').value) || 0 }],
+    paid: Number($('#ePaid').value) || 0,
+    memo: '',
+  };
+  try {
+    await api('POST', '/api/transactions', body);
+  } catch (err) {
+    alert(err.message);
+    return;
+  }
+  state.entryDate = body.date;
+  state.entryCompanyId = String(body.companyId);
+  clearProductsCache(); // 자동 등록된 제품이 힌트에 바로 나오도록
+  $('#eName').value = '';
+  $('#eSpec').value = '';
+  $('#eQty').value = 1;
+  $('#ePrice').value = '';
+  $('#ePaid').value = '';
+  await drawTxRows();
+  toast('저장했습니다.');
+  window.scrollTo({ top: document.body.scrollHeight });
+  $('#eName').focus();
 }
 
 async function drawTxRows() {
@@ -353,19 +576,23 @@ async function drawTxRows() {
   const total = txCache.reduce((s, t) => s + t.total, 0);
   const paid = txCache.reduce((s, t) => s + t.paid, 0);
   $('#txSummary').textContent = `${txCache.length}건 · 합계 ${won(total)}원 · 입금 ${won(paid)}원 · 잔액 ${won(total - paid)}원`;
-  if (!txCache.length) {
-    tbody.innerHTML = `<tr><td colspan="9" class="empty-cell">${state.companies.length ? '거래 내역이 없습니다. [＋ 새 거래] 버튼으로 시작하세요.' : '먼저 상호관리에서 상호를 등록하세요.'}</td></tr>`;
+  const rows = [...txCache].sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id); // 옛날 → 최신
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="12" class="empty-cell">아직 거래가 없습니다. 아래 파란 입력 행에서 첫 거래를 적어보세요.</td></tr>';
     return;
   }
-  tbody.innerHTML = txCache
+  tbody.innerHTML = rows
     .map((t) => {
-      const first = t.items[0];
-      const label = esc(first.name) + (t.items.length > 1 ? ` 외 ${t.items.length - 1}건` : '');
+      const single = t.items.length === 1;
+      const it = t.items[0];
       const balance = t.total - t.paid;
       return `<tr>
         <td>${esc(t.date)}</td>
         <td><b>${esc(t.companyName)}</b></td>
-        <td>${label}${t.memo ? `<div class="sub">${esc(t.memo)}</div>` : ''}</td>
+        <td>${esc(it.name)}${single ? '' : ` <span class="sub">외 ${t.items.length - 1}건</span>`}${t.memo ? `<div class="sub">${esc(t.memo)}</div>` : ''}</td>
+        <td>${single ? esc(it.spec) : ''}</td>
+        <td class="num">${single ? won(it.qty) : ''}</td>
+        <td class="num">${single ? won(it.price) : ''}</td>
         <td class="num">${won(t.supplyTotal)}</td>
         <td class="num">${won(t.taxTotal)}</td>
         <td class="num"><b>${won(t.total)}</b></td>
@@ -374,7 +601,7 @@ async function drawTxRows() {
         <td class="actions">
           <button data-act="sheet" data-id="${t.id}">명세표</button>
           <button data-act="edit" data-id="${t.id}">수정</button>
-          <button data-act="del" data-id="${t.id}" class="danger">삭제</button>
+          <button data-act="del" data-id="${t.id}" class="danger" title="삭제">✕</button>
         </td>
       </tr>`;
     })
@@ -424,7 +651,7 @@ async function openTxForm(tx) {
       </div>
       <div class="table-wrap">
         <table class="items-table">
-          <thead><tr><th>제품 선택</th><th>품명 *</th><th>규격</th><th class="w-qty">수량</th><th class="w-price">단가</th><th class="num">금액</th><th></th></tr></thead>
+          <thead><tr><th>품명 * (자동완성)</th><th>규격</th><th class="w-qty">수량</th><th class="w-price">단가</th><th class="num">금액</th><th></th></tr></thead>
           <tbody id="itemRows"></tbody>
         </table>
       </div>
@@ -443,30 +670,22 @@ async function openTxForm(tx) {
   );
 
   const form = $('#txForm');
-  let products = [];
-
-  async function loadProducts() {
-    products = await api('GET', '/api/products?companyId=' + form.companyId.value);
-    $$('.i-product', form).forEach(fillProductSelect);
-  }
-
-  function fillProductSelect(sel) {
-    const keep = sel.value;
-    sel.innerHTML = '<option value="">직접 입력</option>' + products.map((p) => `<option value="${p.id}">${esc(p.name)}</option>`).join('');
-    sel.value = keep && products.some((p) => String(p.id) === keep) ? keep : '';
-  }
 
   function addRow(item) {
     const tr = document.createElement('tr');
     tr.innerHTML = `
-      <td><select class="i-product"></select></td>
-      <td><input class="i-name" value="${esc(item && item.name)}" placeholder="품명"></td>
+      <td><input class="i-name" value="${esc(item && item.name)}" placeholder="품명" autocomplete="off"></td>
       <td><input class="i-spec" value="${esc(item && item.spec)}" placeholder="규격"></td>
       <td><input class="i-qty" type="number" inputmode="decimal" step="any" min="0" value="${item ? item.qty : 1}"></td>
       <td><input class="i-price" type="number" inputmode="numeric" min="0" value="${item ? item.price : 0}"></td>
       <td class="num i-amount">0</td>
       <td><button type="button" class="i-del" title="품목 삭제">✕</button></td>`;
-    fillProductSelect($('.i-product', tr));
+    attachAutocomplete($('.i-name', tr), () => form.companyId.value, (p) => {
+      $('.i-name', tr).value = p.name;
+      $('.i-spec', tr).value = p.spec;
+      $('.i-price', tr).value = p.price;
+      recompute();
+    });
     $('#itemRows').appendChild(tr);
     recompute();
   }
@@ -490,23 +709,12 @@ async function openTxForm(tx) {
 
   form.addEventListener('input', recompute);
   form.vatMode.addEventListener('change', recompute);
-  $('#txFormCompany').addEventListener('change', loadProducts);
   $('#btnAddItem').addEventListener('click', () => addRow(null));
   $('#itemRows').addEventListener('click', (e) => {
     if (e.target.classList.contains('i-del')) {
       e.target.closest('tr').remove();
       recompute();
     }
-  });
-  $('#itemRows').addEventListener('change', (e) => {
-    if (!e.target.classList.contains('i-product')) return;
-    const p = products.find((x) => String(x.id) === e.target.value);
-    if (!p) return;
-    const tr = e.target.closest('tr');
-    $('.i-name', tr).value = p.name;
-    $('.i-spec', tr).value = p.spec;
-    $('.i-price', tr).value = p.price;
-    recompute();
   });
   $('[data-close]').addEventListener('click', closeModal);
 
@@ -535,6 +743,7 @@ async function openTxForm(tx) {
     try {
       if (tx) await api('PUT', '/api/transactions/' + tx.id, body);
       else await api('POST', '/api/transactions', body);
+      clearProductsCache(); // 자동 등록된 제품이 힌트에 바로 나오도록
       closeModal();
       toast('저장했습니다.');
       drawTxRows();
@@ -543,7 +752,6 @@ async function openTxForm(tx) {
     }
   });
 
-  await loadProducts();
   if (tx) tx.items.forEach((it) => addRow(it));
   else addRow(null);
 }
