@@ -371,6 +371,15 @@ body.sheet-open .fab { display: none; }
   box-shadow: 0 6px 18px rgba(15, 23, 42, 0.25);
 }
 
+/* ─────────────── 버전 표시 ─────────────── */
+.ver-footer {
+  text-align: center;
+  color: var(--sub);
+  font-size: 0.72rem;
+  padding: 1rem 0 1.2rem;
+  opacity: 0.8;
+}
+
 /* ─────────────── 토스트 ─────────────── */
 #toast {
   position: fixed;
