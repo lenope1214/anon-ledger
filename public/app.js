@@ -470,7 +470,7 @@ async function renderTransactions() {
       <p id="txSummary" class="summary"></p>
       <div class="table-wrap">
         <table class="ledger-table">
-          <thead><tr><th>날짜</th><th>상호</th><th>품명</th><th>규격</th><th class="num">수량</th><th class="num">단가</th><th class="num">공급가액</th><th class="num">세액</th><th class="num">합계</th><th class="num">입금</th><th class="num">잔액</th><th class="actions"></th></tr></thead>
+          <thead><tr><th>날짜</th><th>상호</th><th>품명</th><th>규격</th><th class="num">수량</th><th class="num">단가</th><th class="num">공급가액</th><th class="num">합계</th><th class="num">세액</th><th class="num">입금</th><th class="num">잔액</th><th class="actions"></th></tr></thead>
           <tbody id="txRows"></tbody>
           <tbody>
             <tr class="entry-row">
@@ -481,8 +481,8 @@ async function renderTransactions() {
               <td><input id="eQty" type="number" inputmode="decimal" step="any" value="1"></td>
               <td><input id="ePrice" type="number" inputmode="numeric" placeholder="단가"></td>
               <td class="num" id="eSupply">0</td>
-              <td class="num" id="eTax">0</td>
               <td class="num" id="eTotal">0</td>
+              <td class="num" id="eTax">0</td>
               <td><input id="ePaid" type="number" inputmode="numeric" min="0" placeholder="0"></td>
               <td class="num">—</td>
               <td class="actions"><button class="primary" id="btnEntrySave">저장</button></td>
@@ -648,8 +648,8 @@ async function drawTxRows() {
         <td class="num">${single ? won(it.qty) : ''}</td>
         <td class="num">${single ? won(it.price) : ''}</td>
         <td class="num ${t.supplyTotal < 0 ? 'neg' : ''}">${won(t.supplyTotal)}</td>
-        <td class="num ${t.taxTotal < 0 ? 'neg' : ''}">${won(t.taxTotal)}</td>
         <td class="num ${t.total < 0 ? 'neg' : ''}"><b>${won(t.total)}</b></td>
+        <td class="num ${t.taxTotal < 0 ? 'neg' : ''}">${won(t.taxTotal)}</td>
         <td class="num">${won(t.paid)}</td>
         <td class="num ${balance > 0 ? 'warn' : balance < 0 ? 'neg' : ''}">${won(balance)}</td>
         <td class="actions">
