@@ -51,18 +51,38 @@ UI 문구, 커밋 메시지, 문서는 모두 한국어를 사용한다.
 - 예전 단일 비밀번호 시절 데이터(`ledger` 테이블 / 예전 형식 db.json)는
   첫 가입자가 물려받는다 (`takeLegacyLedger`)
 
-## 진행 상태 (2026-08-14 기준)
+## 진행 상태 (2026-08-16 기준)
 
-- **완료**: 상호/제품/거래 관리, 거래명세표 인쇄, 부가세 3모드, 미수금 집계,
-  백업/복원, 회원가입+관리자 승인제(첫 가입자=관리자), Vercel 배포
-  (운영 https://ledger.anon-chat.kr 정상 동작, 관리자 계정 생성 완료),
-  장부 시트형 거래 입력(품명·상호 자동완성 검색, 제품 자동 등록·최신 단가 갱신,
-  마이너스 단가·'=' 부호 토글, 행 체크 =/−/Backspace 조작, 고정 헤더,
-  날짜·상호·품명 필터, ESC 하단 도킹 검색 패널), 세션 자동 연장(90일 슬라이딩)
-- **사용자(소유자)가 진행 중**: dev-ledger.anon-chat.kr 도메인 연결(Vercel Domains에서
-  Git Branch=develop 지정 + Cloudflare CNAME), Neon `dev` 브랜치 생성 후
-  Vercel Preview 환경 전용 DATABASE_URL 등록 — 완료 여부는 사용자에게 확인할 것
-- **다음 작업 후보** (사용자 요청 시): 거래 목록 월별/기간 조회, 상호별 거래 합계표,
-  거래명세표 양식 조정 등
+### 배포 현황 (중요)
+
+- **운영** https://ledger.anon-chat.kr — `production` 브랜치, **v1.1.0**
+- **개발** https://dev-ledger.anon-chat.kr — `develop` 브랜치, **v1.2.0**
+- v1.2.0(상호 자동 등록·온보딩·명세표 인라인 수정)은 **아직 운영에 안 올라갔다.**
+  사용자가 dev에서 확인한 뒤 "운영 반영해줘"라고 하면 `develop` → `production` 머지.
+- 두 도메인 모두 Cloudflare 프록시(주황 구름) 상태 — SSL 자동 갱신 실패 위험이 있어
+  DNS 전용(회색 구름) 권장했으나 사용자 미적용. Vercel 운영 브랜치 설정은
+  Settings → Environments → Production → Branch Tracking (구 UI의 Git 메뉴 아님).
+
+### 완료된 기능
+
+- 상호/제품/거래 관리, 거래명세표 인쇄, 부가세 3모드, 미수금 집계, 백업/복원
+- 회원가입 + 관리자 승인제(첫 가입자=관리자), 세션 90일 자동 연장, 아이디 기억
+- 장부 시트형 거래 입력: 맨 아래 입력 행 + Enter 저장, 품명·상호 자동완성,
+  제품 자동 등록·최신 단가 갱신(마이너스 포함), '=' 부호 토글
+- 행 체크: 클릭 토글, `=` 연속 체크 / `−` 건너뛰기 / `Backspace` 되돌리기, 선택 소계
+- 고정 헤더·고정 입력 행, 날짜·상호·품명 필터, ESC(또는 🔍) 하단 도킹 검색 패널
+- v1.2.0: 상호 자동 등록(없는 이름 입력 시), 기본 탭=거래관리,
+  승인 후 온보딩(내 업체 정보 등록), 명세표 공급받는자 정보 인라인 수정
+- 화면 하단 버전 표시(`/api/version`), 정적 파일 `Cache-Control: no-cache`
+
+### 다음 작업 후보 (사용자 요청 시)
+
+- [＋ 여러 품목 거래] 팝업에도 상호 자동 등록 적용 (현재는 기존 상호 선택만 가능)
+- 거래 목록 월별/기간 집계, 상호별 거래 합계표, 거래명세표 양식 조정
+
+### 환경 메모
+
 - Vercel은 package.json의 start 스크립트로 server.js를 직접 실행하는 방식으로
   배포된다 — server.js도 DATABASE_URL이 있으면 Neon을 쓰는 이유
+- UI 검증은 Chromium + playwright-core로 실행한다 (`npm install --no-save playwright-core`,
+  `executablePath: '/opt/pw-browsers/chromium'`, `NODE_PATH`로 모듈 경로 지정)
