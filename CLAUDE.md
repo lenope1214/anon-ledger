@@ -10,7 +10,7 @@ UI 문구, 커밋 메시지, 문서는 모두 한국어를 사용한다.
 - `staging` — develop과 production 사이 중간 검증이 필요할 때만 사용
 - 흐름: `feat/*` → `develop` → (`staging` →) `production`
 - 작업이 끝나면 **PR 없이** 위 순서대로 직접 머지하고 푸시한다.
-- 운영(production) 반영 시 package.json의 version을 올린다 —
+- 기능이 develop에 머지될 때마다 package.json의 version을 올린다 —
   화면 하단 버전 표시(/api/version)로 배포 확인에 쓰인다.
 - `main` 브랜치는 삭제되었다. 다시 만들거나 푸시하지 말 것
   (Vercel Production Branch는 `production`).
