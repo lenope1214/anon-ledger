@@ -55,6 +55,20 @@
   <p class="hint ss-hint">↑↓로 이동, Enter로 선택 — 선택하면 아래 입력 행에 바로 채워집니다.</p>
 </div>
 
+<div id="tourOverlay" class="hidden">
+  <div id="tourSpot"></div>
+  <div id="tourBox">
+    <p id="tourStep" class="tour-step"></p>
+    <h3 id="tourTitle"></h3>
+    <p id="tourBody"></p>
+    <div class="tour-actions">
+      <button type="button" id="tourSkip" class="tour-skip">건너뛰기</button>
+      <button type="button" id="tourPrev">이전</button>
+      <button type="button" id="tourNext" class="primary">다음</button>
+    </div>
+  </div>
+</div>
+
 <div id="toast" class="hidden"></div>
 
 <script src="app.js"></script>

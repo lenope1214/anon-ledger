@@ -338,6 +338,7 @@ body.sheet-open .ledger-wrap {
   min-height: 8rem;
 }
 body.sheet-open .fab { display: none; }
+body.sheet-open .fab-help { display: none; }
 
 @keyframes sheet-up {
   from { transform: translateY(30%); opacity: 0.5; }
@@ -369,6 +370,59 @@ body.sheet-open .fab { display: none; }
   font-size: 0.95rem;
   background: var(--card);
   box-shadow: 0 6px 18px rgba(15, 23, 42, 0.25);
+}
+
+/* ─────────────── 사용법 안내 (스포트라이트) ─────────────── */
+#tourOverlay { position: fixed; inset: 0; z-index: 200; }
+
+/* 강조 영역: 큰 그림자로 주변을 어둡게 만들어 구멍처럼 보이게 한다 */
+#tourSpot {
+  position: fixed;
+  border-radius: 10px;
+  box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.62);
+  outline: 3px solid var(--accent);
+  outline-offset: 1px;
+  transition: top 0.18s ease, left 0.18s ease, width 0.18s ease, height 0.18s ease;
+  pointer-events: none;
+}
+
+#tourBox {
+  position: fixed;
+  z-index: 201;
+  width: min(23rem, calc(100vw - 2rem));
+  background: var(--card);
+  border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.35);
+  padding: 1rem 1.1rem;
+}
+
+#tourBox h3 { font-size: 1rem; margin-bottom: 0.35rem; }
+#tourBox p { font-size: 0.88rem; color: var(--text); line-height: 1.55; }
+.tour-step { color: var(--sub); font-size: 0.75rem !important; font-weight: 700; margin-bottom: 0.2rem; }
+.tour-actions { display: flex; gap: 0.4rem; margin-top: 0.9rem; }
+.tour-actions .tour-skip { margin-right: auto; color: var(--sub); }
+
+/* 사용법 요약 줄 + [?] 버튼 */
+.sheet-hint { display: flex; flex-wrap: wrap; gap: 0.3rem 0.9rem; align-items: center; }
+.link-btn {
+  border: none;
+  background: none;
+  color: var(--accent);
+  font-weight: 700;
+  padding: 0;
+  text-decoration: underline;
+}
+.link-btn:hover { background: none; color: var(--accent-dark); }
+
+.fab-help {
+  right: 1rem;
+  bottom: 4.2rem;
+  width: 2.6rem;
+  height: 2.6rem;
+  padding: 0;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--accent);
 }
 
 /* ─────────────── 버전 표시 ─────────────── */
