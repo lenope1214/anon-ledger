@@ -5,7 +5,7 @@ const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => Array.from(el.querySelectorAll(sel));
 
 const state = {
-  tab: 'companies',
+  tab: 'transactions',  // 기본 화면 = 장부(거래관리)
   me: null,             // { username, status, isAdmin }
   companies: [],
   settings: {},
@@ -456,11 +456,6 @@ let sheetLastIdx = null;      // 마지막으로 체크한 행 위치 ('=' 연�
 async function renderTransactions() {
   await refreshCompanies();
   const main = $('#main');
-  if (!state.companies.length) {
-    main.innerHTML = `<section class="card">${emptyNotice('거래를 입력하려면 먼저 상호를 등록해야 합니다.', '상호관리로 이동', 'companies')}</section>`;
-    bindGoto(main);
-    return;
-  }
   main.innerHTML = `
     <section class="card">
       <div class="section-head">
@@ -487,7 +482,7 @@ async function renderTransactions() {
             <tr class="entry-row">
               <td class="chk"></td>
               <td><input type="date" id="eDate" value="${esc(state.entryDate || today())}"></td>
-              <td><input id="eCompany" placeholder="상호 검색" autocomplete="off"></td>
+              <td><input id="eCompany" placeholder="상호 입력·검색" autocomplete="off"></td>
               <td><input id="eName" placeholder="품명 입력" autocomplete="off"></td>
               <td><input id="eSpec" placeholder="규격"></td>
               <td><input id="eQty" type="number" inputmode="decimal" step="any" value="1"></td>
@@ -632,8 +627,9 @@ function recomputeEntry() {
 }
 
 async function saveEntry() {
-  if (!state.entryCompanyId) {
-    toast('상호를 검색해 선택하세요.');
+  const typedCompany = $('#eCompany').value.trim();
+  if (!state.entryCompanyId && !typedCompany) {
+    toast('상호를 입력하세요.');
     $('#eCompany').focus();
     return;
   }
@@ -644,22 +640,26 @@ async function saveEntry() {
     return;
   }
   const body = {
-    companyId: Number(state.entryCompanyId),
+    companyId: Number(state.entryCompanyId) || 0,
+    companyName: typedCompany, // 없는 상호면 서버가 자동 등록한다
     date: $('#eDate').value || today(),
     vatMode: state.entryVat,
     items: [{ name, spec: $('#eSpec').value.trim(), qty: Number($('#eQty').value) || 0, price: Number($('#ePrice').value) || 0 }],
     paid: Number($('#ePaid').value) || 0,
     memo: '',
   };
+  let tx;
   try {
-    await api('POST', '/api/transactions', body);
+    tx = await api('POST', '/api/transactions', body);
   } catch (err) {
     alert(err.message);
     return;
   }
   state.entryDate = body.date;
-  state.entryCompanyId = String(body.companyId);
   clearProductsCache(); // 자동 등록된 제품이 힌트에 바로 나오도록
+  await refreshCompanies(); // 자동 등록된 상호가 검색에 바로 나오도록
+  const savedCompany = state.companies.find((c) => c.id === tx.companyId);
+  if (savedCompany) applyEntryCompany(savedCompany);
   $('#eName').value = '';
   $('#eSpec').value = '';
   $('#eQty').value = 1;
@@ -1146,6 +1146,21 @@ function partyTable(title, info) {
     </table>`;
 }
 
+// 공급받는자 칸을 입력칸으로 — 명세표에서 바로 상호 정보를 채우면 상호관리에 저장된다
+function partyTableEditable(c) {
+  const f = (field, label, extra = '') =>
+    `<tr><th>${label}</th><td><input class="party-input" data-f="${field}" value="${esc(c[field])}" ${extra}></td></tr>`;
+  return `
+    <table class="party-table">
+      <caption>공급받는자</caption>
+      <tr><th>상호</th><td>${esc(c.name)}</td></tr>
+      ${f('owner', '대표자')}
+      ${f('bizNo', '사업자번호', 'placeholder="000-00-00000"')}
+      ${f('phone', '연락처', 'inputmode="tel"')}
+      ${f('address', '주소')}
+    </table>`;
+}
+
 function openStatement(tx) {
   const company = state.companies.find((c) => c.id === tx.companyId) || { name: tx.companyName || '' };
   const s = state.settings;
@@ -1171,7 +1186,7 @@ function openStatement(tx) {
       <h2 class="sheet-title">거 래 명 세 표</h2>
       <p class="sheet-date">거래일자: ${esc(tx.date)} (${VAT_LABEL[tx.vatMode] || ''})</p>
       <div class="sheet-parties">
-        ${partyTable('공급받는자', company)}
+        ${company.id ? partyTableEditable(company) : partyTable('공급받는자', company)}
         ${partyTable('공급자', s)}
       </div>
       <table class="sheet-items">
@@ -1187,6 +1202,25 @@ function openStatement(tx) {
       ${tx.memo ? `<p class="sheet-memo">비고: ${esc(tx.memo)}</p>` : ''}
       <p class="sheet-sign">인수자: ____________ (인)</p>
     </div>`;
+  // 공급받는자 칸 수정 → 상호관리에 바로 저장
+  $$('#printSheet .party-input').forEach((inp) => {
+    inp.addEventListener('change', async () => {
+      company[inp.dataset.f] = inp.value.trim();
+      try {
+        await api('PUT', '/api/companies/' + company.id, {
+          name: company.name,
+          owner: company.owner || '',
+          bizNo: company.bizNo || '',
+          phone: company.phone || '',
+          address: company.address || '',
+          memo: company.memo || '',
+        });
+        toast('상호 정보를 저장했습니다.');
+      } catch (err) {
+        alert(err.message);
+      }
+    });
+  });
   document.body.classList.add('printing');
   $('#printOverlay').classList.remove('hidden');
 }
@@ -1332,6 +1366,47 @@ async function renderAdmin() {
   };
 }
 
+/* ─────────────── 온보딩 (승인 후 첫 진입) ─────────────── */
+function renderOnboarding() {
+  $('#tabs').classList.add('hidden');
+  $('#main').innerHTML = `
+    <section class="card narrow">
+      <h2>🎉 시작하기 전에</h2>
+      <p class="hint">내 업체 정보를 등록해 주세요. 거래명세표의 '공급자' 칸에 이대로 인쇄됩니다.<br>
+      [내 정보] 탭에서 언제든 고칠 수 있습니다.</p>
+      <form id="onboardForm">
+        <label>상호명 *<input name="name" required placeholder="예: 우리컴퓨터"></label>
+        <label>대표자<input name="owner"></label>
+        <label>사업자등록번호<input name="bizNo" placeholder="000-00-00000"></label>
+        <label>연락처<input name="phone" inputmode="tel"></label>
+        <label>주소<input name="address"></label>
+        <div class="form-actions">
+          <button type="button" id="btnSkipOnboard">나중에 하기</button>
+          <button type="submit" class="primary">저장하고 시작하기</button>
+        </div>
+      </form>
+    </section>`;
+  $('#onboardForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    try {
+      state.settings = await api('PUT', '/api/settings', Object.fromEntries(new FormData(e.target)));
+    } catch (err) {
+      alert(err.message);
+      return;
+    }
+    toast('업체 정보를 저장했습니다. 이제 거래를 입력해 보세요!');
+    $('#tabs').classList.remove('hidden');
+    render();
+  });
+  $('#btnSkipOnboard').addEventListener('click', () => {
+    try {
+      localStorage.setItem('skipOnboarding', '1');
+    } catch (e) { /* 무시 */ }
+    $('#tabs').classList.remove('hidden');
+    render();
+  });
+}
+
 /* ─────────────── 승인 대기 / 거절 화면 ─────────────── */
 function renderBlocked(st) {
   const rejected = st.status === 'rejected';
@@ -1382,6 +1457,15 @@ $('#btnLogout').addEventListener('click', async () => {
     await refreshCompanies();
   } catch (e) {
     $('#main').innerHTML = `<section class="card"><p class="empty-notice">서버에 연결할 수 없습니다: ${esc(e.message)}</p></section>`;
+    return;
+  }
+  // 승인 후 첫 진입이면 내 업체 정보 등록(온보딩)부터
+  let skipOnboarding = false;
+  try {
+    skipOnboarding = localStorage.getItem('skipOnboarding') === '1';
+  } catch (e) { /* 무시 */ }
+  if (!state.settings.name && !skipOnboarding) {
+    renderOnboarding();
     return;
   }
   render();
