@@ -892,7 +892,7 @@ function ssSetTab(tab) {
   ss.tab = tab;
   $('#ssTabCompany').classList.toggle('active', tab === 'company');
   $('#ssTabProduct').classList.toggle('active', tab === 'product');
-  $('#ssInput').placeholder = tab === 'company' ? '상호명·대표자 검색' : '품명·규격 검색 (전체 상호)';
+  $('#ssInput').placeholder = tab === 'company' ? '상호명·대표자 검색 (아래에서 바로 수정 가능)' : '품명·규격 검색 (전체 상호)';
   ssUpdate();
   $('#ssInput').focus();
 }
@@ -919,34 +919,103 @@ async function ssUpdate() {
   ssRender();
 }
 
+const COMPANY_FIELDS = [
+  { f: 'name', label: '상호명', cls: 'w-name' },
+  { f: 'owner', label: '대표자명', cls: 'w-owner' },
+  { f: 'bizNo', label: '사업자번호', cls: 'w-biz', ph: '000-00-00000' },
+  { f: 'phone', label: '연락처', cls: 'w-phone' },
+  { f: 'address', label: '주소', cls: 'w-addr' },
+];
+
 function ssRender() {
   const box = $('#ssResults');
   if (!ss.items.length) {
     box.innerHTML = '<p class="empty-cell">검색 결과가 없습니다.</p>';
     return;
   }
-  box.innerHTML = ss.items
-    .map((it, i) =>
-      ss.tab === 'company'
-        ? `<div class="ss-item ${i === ss.sel ? 'sel' : ''}" data-i="${i}">
-            <b>${esc(it.name)}</b>${it.owner ? `<span class="sub">${esc(it.owner)}</span>` : ''}
-            <span class="right ${it.outstanding > 0 ? 'warn' : ''}">미수 ${won(it.outstanding)}원</span>
-          </div>`
-        : `<div class="ss-item ${i === ss.sel ? 'sel' : ''}" data-i="${i}">
-            <b>${esc(it.name)}</b>${it.spec ? `<span class="sub">${esc(it.spec)}</span>` : ''}
-            <span class="sub">${esc(it.companyName)}</span>
-            <span class="right">${won(it.price)}원</span>
-          </div>`
-    )
-    .join('');
-  const selEl = box.querySelector('.ss-item.sel');
+  if (ss.tab === 'company') {
+    // 상호 정보를 입력칸으로 보여줘 그 자리에서 바로 고칠 수 있게 한다
+    box.innerHTML = `
+      <div class="ss-grid">
+        <div class="ss-grid-head">
+          ${COMPANY_FIELDS.map((c) => `<span class="${c.cls}">${c.label}</span>`).join('')}
+          <span class="w-out">미수금</span><span class="w-pick"></span>
+        </div>
+        ${ss.items
+          .map(
+            (c, i) => `<div class="ss-row ${i === ss.sel ? 'sel' : ''}" data-i="${i}" data-id="${c.id}">
+              ${COMPANY_FIELDS.map(
+                (col) => `<input class="${col.cls}" data-f="${col.f}" data-id="${c.id}" value="${esc(c[col.f])}" placeholder="${col.ph || col.label}">`
+              ).join('')}
+              <span class="w-out num ${c.outstanding > 0 ? 'warn' : ''}">${won(c.outstanding)}원</span>
+              <button type="button" class="w-pick primary ss-pick">선택</button>
+            </div>`
+          )
+          .join('')}
+      </div>`;
+    $$('.ss-row input', box).forEach((inp) => {
+      inp.addEventListener('change', () => saveCompanyField(inp));
+      inp.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          inp.blur(); // change가 먼저 발생해 저장된다
+        }
+      });
+    });
+  } else {
+    box.innerHTML = ss.items
+      .map(
+        (it, i) => `<div class="ss-item ${i === ss.sel ? 'sel' : ''}" data-i="${i}">
+          <b>${esc(it.name)}</b>${it.spec ? `<span class="sub">${esc(it.spec)}</span>` : ''}
+          <span class="sub">${esc(it.companyName)}</span>
+          <span class="right">${won(it.price)}원</span>
+        </div>`
+      )
+      .join('');
+  }
+  const selEl = box.querySelector('.ss-item.sel, .ss-row.sel');
   if (selEl) selEl.scrollIntoView({ block: 'nearest' });
-  box.querySelectorAll('.ss-item').forEach((el) => {
+  box.querySelectorAll('.ss-item, .ss-row').forEach((el) => {
     el.addEventListener('mousedown', (e) => {
+      if (e.target.tagName === 'INPUT') return; // 입력칸 클릭은 수정, 그 외는 선택
       e.preventDefault();
       ssPick(Number(el.dataset.i));
     });
   });
+}
+
+// 검색창에서 고친 상호 정보를 저장한다
+async function saveCompanyField(inp) {
+  const id = Number(inp.dataset.id);
+  const c = state.companies.find((x) => x.id === id);
+  if (!c) return;
+  const field = inp.dataset.f;
+  const value = inp.value.trim();
+  if (field === 'name' && !value) {
+    inp.value = c.name;
+    toast('상호명은 비울 수 없습니다.');
+    return;
+  }
+  if (c[field] === value) return;
+  const prev = c[field];
+  c[field] = value;
+  try {
+    await api('PUT', '/api/companies/' + id, {
+      name: c.name,
+      owner: c.owner || '',
+      bizNo: c.bizNo || '',
+      phone: c.phone || '',
+      address: c.address || '',
+      memo: c.memo || '',
+    });
+    toast('상호 정보를 저장했습니다.');
+    if (field === 'name' && String(id) === String(state.entryCompanyId)) applyEntryCompany(c);
+    drawTxRows(); // 표의 상호명도 갱신
+  } catch (err) {
+    c[field] = prev;
+    inp.value = prev;
+    alert(err.message);
+  }
 }
 
 function ssPick(i) {
