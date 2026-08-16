@@ -41,6 +41,19 @@
   </div>
 </div>
 
+<div id="searchSheet" class="sheet-panel hidden">
+  <div class="sheet-head">
+    <div class="auth-tabs sheet-tabs">
+      <button type="button" id="ssTabCompany" class="active">상호</button>
+      <button type="button" id="ssTabProduct">제품</button>
+    </div>
+    <button type="button" id="ssClose" title="닫기 (ESC)">✕</button>
+  </div>
+  <input id="ssInput" placeholder="검색어 입력" autocomplete="off">
+  <div id="ssResults" class="ss-results"></div>
+  <p class="hint ss-hint">↑↓로 이동, Enter로 선택 — 선택하면 아래 입력 행에 바로 채워집니다.</p>
+</div>
+
 <div id="toast" class="hidden"></div>
 
 <script src="app.js"></script>

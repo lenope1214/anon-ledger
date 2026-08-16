@@ -92,6 +92,7 @@ body {
 .hint { color: var(--sub); font-size: 0.85rem; margin-bottom: 0.75rem; }
 .sub { color: var(--sub); font-size: 0.8rem; }
 .warn { color: var(--warn); font-weight: 700; }
+.neg { color: var(--danger); }
 
 .empty-notice { text-align: center; padding: 2rem 1rem; color: var(--sub); }
 .empty-notice button { margin-top: 0.75rem; }
@@ -178,6 +179,77 @@ form label input, form label select { margin-top: 0.2rem; font-weight: 400; }
 .modal-box.wide { max-width: 880px; }
 .modal-box h2 { font-size: 1.05rem; margin-bottom: 0.9rem; }
 
+/* 장부 시트: 헤더 고정 + 입력 행 하단 고정 (표 안에서 스크롤) */
+.ledger-wrap {
+  max-height: calc(100vh - 320px);
+  min-height: 20rem;
+  overflow: auto;
+}
+
+.ledger-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #f8fafc;
+  box-shadow: 0 1px 0 var(--line);
+}
+
+.ledger-table .entry-row td {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  box-shadow: 0 -1px 0 var(--line);
+}
+
+/* 행 체크 */
+.chk { width: 2rem; text-align: center; }
+.chk input { width: auto; cursor: pointer; }
+#txRows tr[data-id] { cursor: pointer; }
+#txRows tr.row-checked td { background: #fefce8; }
+#txRows tr.row-pointer { outline: 2px solid var(--accent); outline-offset: -2px; }
+.sel-summary { color: var(--accent-dark); font-weight: 700; }
+
+/* 검색(필터) 입력 */
+.section-head .date-filter { flex: 0 1 auto; width: auto; }
+.section-head input[type="search"]#fProduct { flex: 1 1 130px; min-width: 8rem; }
+.range-sep { align-self: center; color: var(--sub); }
+#btnClearFilter { color: var(--sub); }
+
+/* 장부 시트 빠른 입력 행 */
+.entry-row td { background: #eff6ff; padding: 0.35rem 0.25rem; }
+.entry-row input, .entry-row select { padding: 0.4rem 0.5rem; font-size: 0.88rem; }
+.entry-row #eDate { min-width: 8.4rem; }
+.entry-row #eCompany { min-width: 7rem; }
+.entry-row #eName { min-width: 8.5rem; }
+.entry-row #eSpec { min-width: 5.5rem; }
+.entry-row #eQty { min-width: 4rem; }
+.entry-row #ePrice, .entry-row #ePaid { min-width: 5.8rem; }
+.section-head .vat-select { flex: 0 1 auto; width: auto; }
+.ledger-table td .sub { display: inline; }
+
+/* 품명 자동완성 힌트 */
+.ac-box {
+  position: fixed;
+  z-index: 70;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.18);
+  min-width: 250px;
+  max-height: 15rem;
+  overflow-y: auto;
+}
+.ac-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.45rem 0.7rem;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ac-item.sel, .ac-item:hover { background: #eff6ff; }
+.ac-item .ac-price { margin-left: auto; color: var(--sub); font-size: 0.82rem; }
+
 /* 거래 품목 입력 표 */
 .items-table input { min-width: 6.5rem; padding: 0.4rem 0.5rem; }
 .items-table .i-qty { min-width: 4.5rem; }
@@ -236,6 +308,68 @@ form label input, form label select { margin-top: 0.2rem; font-weight: 400; }
 .btn-link:hover { background: #f1f5f9; }
 .restore-btn { cursor: pointer; font-weight: 400; }
 .divider { border: none; border-top: 1px solid var(--line); margin: 1rem 0; }
+
+/* ─────────────── 빠른 검색 패널 (하단 도킹 — 본문이 위로 밀림) ─────────────── */
+.sheet-panel {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 90;
+  max-width: 1100px;
+  margin: 0 auto;
+  height: 38vh;
+  min-height: 17rem;
+  display: flex;
+  flex-direction: column;
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-bottom: none;
+  border-radius: 16px 16px 0 0;
+  box-shadow: 0 -10px 28px rgba(15, 23, 42, 0.18);
+  padding: 0.9rem 1rem 0.7rem;
+  animation: sheet-up 0.16s ease;
+}
+
+/* 패널이 열리면 본문과 장부 스크롤 영역을 패널 높이만큼 줄여서 가려지지 않게 한다 */
+body.sheet-open #main { padding-bottom: calc(38vh + 1.5rem); }
+body.sheet-open .ledger-wrap {
+  max-height: calc(100vh - 320px - 38vh);
+  min-height: 8rem;
+}
+body.sheet-open .fab { display: none; }
+
+@keyframes sheet-up {
+  from { transform: translateY(30%); opacity: 0.5; }
+  to { transform: translateY(0); opacity: 1; }
+}
+
+.sheet-head { display: flex; gap: 0.5rem; align-items: center; margin-bottom: 0.6rem; }
+.sheet-head .sheet-tabs { flex: 1; margin-bottom: 0; }
+.ss-results { flex: 1; overflow-y: auto; margin-top: 0.6rem; min-height: 9rem; }
+.ss-item {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  padding: 0.55rem 0.6rem;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.ss-item.sel, .ss-item:hover { background: #eff6ff; }
+.ss-item .right { margin-left: auto; font-size: 0.85rem; color: var(--sub); white-space: nowrap; }
+.ss-hint { margin: 0.4rem 0 0; }
+
+.fab {
+  position: fixed;
+  right: 1rem;
+  bottom: 1.1rem;
+  z-index: 60;
+  border-radius: 999px;
+  padding: 0.65rem 1rem;
+  font-size: 0.95rem;
+  background: var(--card);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.25);
+}
 
 /* ─────────────── 토스트 ─────────────── */
 #toast {

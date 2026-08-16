@@ -33,6 +33,14 @@
     if (st.authed) { location.href = '/'; return; }
   } catch (e) { /* 서버 연결 실패 시 제출할 때 안내됨 */ }
 
+  try {
+    const last = localStorage.getItem('lastUsername');
+    if (last) {
+      $('#username').value = last;
+      $('#pw').focus();
+    }
+  } catch (e) { /* localStorage 사용 불가 환경 */ }
+
   function setMode(next) {
     mode = next;
     const signup = mode === 'signup';
@@ -66,7 +74,11 @@
         body: JSON.stringify({ username: $('#username').value.trim(), password: $('#pw').value }),
       });
       const data = await res.json().catch(() => ({}));
-      if (res.ok) { location.href = '/'; return; }
+      if (res.ok) {
+        try { localStorage.setItem('lastUsername', $('#username').value.trim()); } catch (e2) { /* 무시 */ }
+        location.href = '/';
+        return;
+      }
       err.textContent = data.error || (mode === 'signup' ? '가입에 실패했습니다.' : '로그인에 실패했습니다.');
     } catch (e2) {
       err.textContent = '서버에 연결할 수 없습니다.';

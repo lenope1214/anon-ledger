@@ -53,7 +53,10 @@ UI 문구, 커밋 메시지, 문서는 모두 한국어를 사용한다.
 
 - **완료**: 상호/제품/거래 관리, 거래명세표 인쇄, 부가세 3모드, 미수금 집계,
   백업/복원, 회원가입+관리자 승인제(첫 가입자=관리자), Vercel 배포
-  (운영 https://ledger.anon-chat.kr 정상 동작, 관리자 계정 생성 완료)
+  (운영 https://ledger.anon-chat.kr 정상 동작, 관리자 계정 생성 완료),
+  장부 시트형 거래 입력(품명·상호 자동완성 검색, 제품 자동 등록·최신 단가 갱신,
+  마이너스 단가·'=' 부호 토글, 행 체크 =/−/Backspace 조작, 고정 헤더,
+  날짜·상호·품명 필터, ESC 하단 도킹 검색 패널), 세션 자동 연장(90일 슬라이딩)
 - **사용자(소유자)가 진행 중**: dev-ledger.anon-chat.kr 도메인 연결(Vercel Domains에서
   Git Branch=develop 지정 + Cloudflare CNAME), Neon `dev` 브랜치 생성 후
   Vercel Preview 환경 전용 DATABASE_URL 등록 — 완료 여부는 사용자에게 확인할 것
