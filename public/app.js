@@ -427,6 +427,7 @@ function attachSearchDropdown(input, opts) {
         close(); // 힌트를 고르지 않았으면 입력한 그대로 저장 진행
       }
     } else if (e.key === 'Escape') {
+      e.stopPropagation(); // 힌트만 닫고 검색 시트는 열리지 않게
       close();
     }
   });
@@ -503,16 +504,13 @@ async function renderTransactions() {
       </div>
       <p class="hint">맨 아래 파란 행에 적고 Enter(또는 저장)를 누르면 바로 기록됩니다.
       품명을 입력하면 등록된 제품이 힌트로 나타나며, 적은 품명·규격·단가는 제품관리에 자동 등록됩니다.
-      <b>=</b> 키: 입력 중엔 단가 부호 토글(+ ⇄ −), 행을 클릭한 뒤엔 다음 행 연속 체크.</p>
+      <b>=</b> 키: 입력 중엔 단가 부호 토글(+ ⇄ −), 행을 클릭한 뒤엔 다음 행 연속 체크.
+      <b>ESC</b> 키(또는 오른쪽 아래 🔍): 상호·제품 빠른 검색.</p>
+      <button type="button" class="fab" id="btnQuickSearch" title="빠른 검색 (ESC)">🔍 검색</button>
     </section>`;
 
   const eCompany = $('#eCompany');
-
-  // 입력 행의 상호를 설정한다 (설정하면 다음 입력에도 계속 유지, 새로고침 시 초기화)
-  function setEntryCompany(c) {
-    state.entryCompanyId = String(c.id);
-    eCompany.value = c.name;
-  }
+  const setEntryCompany = applyEntryCompany; // 입력 행 상호 설정 (세션 동안 유지, 새로고침 시 초기화)
   const preferred = state.companies.find((c) => String(c.id) === String(state.txCompanyId || state.entryCompanyId));
   if (preferred) setEntryCompany(preferred);
   else state.entryCompanyId = '';
@@ -586,6 +584,7 @@ async function renderTransactions() {
     $('#eQty').focus();
     $('#eQty').select();
   });
+  $('#btnQuickSearch').addEventListener('click', toggleSearchSheet);
   $('#btnEntrySave').addEventListener('click', saveEntry);
   $('.entry-row').addEventListener('keydown', (e) => {
     if (e.target.tagName !== 'INPUT') return;
@@ -611,6 +610,13 @@ async function renderTransactions() {
 function scrollSheetToBottom() {
   const wrap = $('.ledger-wrap');
   if (wrap) wrap.scrollTop = wrap.scrollHeight;
+}
+
+// 입력 행의 상호를 설정한다 (렌더 여부와 무관하게 상태를 갱신)
+function applyEntryCompany(c) {
+  state.entryCompanyId = String(c.id);
+  const el = $('#eCompany');
+  if (el) el.value = c.name;
 }
 
 function recomputeEntry() {
@@ -782,6 +788,159 @@ document.addEventListener('keydown', (e) => {
   if (!$('#modal').classList.contains('hidden')) return;
   e.preventDefault();
   checkNextRow();
+});
+
+/* ─────────────── 빠른 검색 시트 (ESC / 🔍) ─────────────── */
+const ss = { tab: 'company', items: [], sel: 0 };
+
+async function getAllProducts() {
+  if (!state.productsCache.all) {
+    state.productsCache.all = await api('GET', '/api/products');
+  }
+  return state.productsCache.all;
+}
+
+function searchSheetOpen() {
+  return !$('#searchSheet').classList.contains('hidden');
+}
+
+function openSearchSheet() {
+  $('#searchSheet').classList.remove('hidden');
+  $('#sheetBackdrop').classList.remove('hidden');
+  $('#ssInput').value = '';
+  ssUpdate();
+  $('#ssInput').focus();
+}
+
+function closeSearchSheet() {
+  $('#searchSheet').classList.add('hidden');
+  $('#sheetBackdrop').classList.add('hidden');
+}
+
+function toggleSearchSheet() {
+  if (searchSheetOpen()) closeSearchSheet();
+  else openSearchSheet();
+}
+
+function ssSetTab(tab) {
+  ss.tab = tab;
+  $('#ssTabCompany').classList.toggle('active', tab === 'company');
+  $('#ssTabProduct').classList.toggle('active', tab === 'product');
+  $('#ssInput').placeholder = tab === 'company' ? '상호명·대표자 검색' : '품명·규격 검색 (전체 상호)';
+  ssUpdate();
+  $('#ssInput').focus();
+}
+
+async function ssUpdate() {
+  const q = $('#ssInput').value.trim().toLowerCase();
+  if (ss.tab === 'company') {
+    ss.items = state.companies
+      .filter((c) => !q || c.name.toLowerCase().includes(q) || (c.owner || '').toLowerCase().includes(q))
+      .slice(0, 50);
+  } else {
+    const names = new Map(state.companies.map((c) => [c.id, c.name]));
+    let all = [];
+    try {
+      all = await getAllProducts();
+    } catch (e) { /* 미로그인 등 */ }
+    ss.items = all
+      .filter((p) => names.has(p.companyId))
+      .filter((p) => !q || p.name.toLowerCase().includes(q) || (p.spec || '').toLowerCase().includes(q))
+      .map((p) => Object.assign({}, p, { companyName: names.get(p.companyId) }))
+      .slice(0, 50);
+  }
+  ss.sel = 0;
+  ssRender();
+}
+
+function ssRender() {
+  const box = $('#ssResults');
+  if (!ss.items.length) {
+    box.innerHTML = '<p class="empty-cell">검색 결과가 없습니다.</p>';
+    return;
+  }
+  box.innerHTML = ss.items
+    .map((it, i) =>
+      ss.tab === 'company'
+        ? `<div class="ss-item ${i === ss.sel ? 'sel' : ''}" data-i="${i}">
+            <b>${esc(it.name)}</b>${it.owner ? `<span class="sub">${esc(it.owner)}</span>` : ''}
+            <span class="right ${it.outstanding > 0 ? 'warn' : ''}">미수 ${won(it.outstanding)}원</span>
+          </div>`
+        : `<div class="ss-item ${i === ss.sel ? 'sel' : ''}" data-i="${i}">
+            <b>${esc(it.name)}</b>${it.spec ? `<span class="sub">${esc(it.spec)}</span>` : ''}
+            <span class="sub">${esc(it.companyName)}</span>
+            <span class="right">${won(it.price)}원</span>
+          </div>`
+    )
+    .join('');
+  const selEl = box.querySelector('.ss-item.sel');
+  if (selEl) selEl.scrollIntoView({ block: 'nearest' });
+  box.querySelectorAll('.ss-item').forEach((el) => {
+    el.addEventListener('mousedown', (e) => {
+      e.preventDefault();
+      ssPick(Number(el.dataset.i));
+    });
+  });
+}
+
+function ssPick(i) {
+  const it = ss.items[i];
+  if (!it) return;
+  if (ss.tab === 'company') {
+    applyEntryCompany(it);
+    closeSearchSheet();
+    const name = $('#eName');
+    if (name) name.focus();
+  } else {
+    const c = state.companies.find((x) => x.id === it.companyId);
+    if (c) applyEntryCompany(c); // 제품을 고르면 그 제품의 상호까지 함께 적용
+    const name = $('#eName');
+    const spec = $('#eSpec');
+    const price = $('#ePrice');
+    if (name) name.value = it.name;
+    if (spec) spec.value = it.spec;
+    if (price) price.value = it.price;
+    recomputeEntry();
+    closeSearchSheet();
+    const qty = $('#eQty');
+    if (qty) {
+      qty.focus();
+      qty.select();
+    }
+  }
+}
+
+$('#ssTabCompany').addEventListener('click', () => ssSetTab('company'));
+$('#ssTabProduct').addEventListener('click', () => ssSetTab('product'));
+$('#ssClose').addEventListener('click', closeSearchSheet);
+$('#sheetBackdrop').addEventListener('click', closeSearchSheet);
+let ssTimer = null;
+$('#ssInput').addEventListener('input', () => {
+  clearTimeout(ssTimer);
+  ssTimer = setTimeout(ssUpdate, 150);
+});
+$('#ssInput').addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    ss.sel = Math.min(ss.sel + 1, ss.items.length - 1);
+    ssRender();
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    ss.sel = Math.max(ss.sel - 1, 0);
+    ssRender();
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    ssPick(ss.sel);
+  }
+});
+
+// ESC: 거래관리 어디서든 검색 시트 열기/닫기 (팝업·명세표가 열려 있을 땐 제외)
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Escape' || state.tab !== 'transactions') return;
+  if (!$('#modal').classList.contains('hidden')) return;
+  if (document.body.classList.contains('printing')) return;
+  e.preventDefault();
+  toggleSearchSheet();
 });
 
 /* ── 거래 입력/수정 폼 ── */
