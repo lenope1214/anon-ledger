@@ -179,6 +179,41 @@ form label input, form label select { margin-top: 0.2rem; font-weight: 400; }
 .modal-box.wide { max-width: 880px; }
 .modal-box h2 { font-size: 1.05rem; margin-bottom: 0.9rem; }
 
+/* 장부 시트: 헤더 고정 + 입력 행 하단 고정 (표 안에서 스크롤) */
+.ledger-wrap {
+  max-height: calc(100vh - 320px);
+  min-height: 20rem;
+  overflow: auto;
+}
+
+.ledger-table thead th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #f8fafc;
+  box-shadow: 0 1px 0 var(--line);
+}
+
+.ledger-table .entry-row td {
+  position: sticky;
+  bottom: 0;
+  z-index: 4;
+  box-shadow: 0 -1px 0 var(--line);
+}
+
+/* 행 체크 */
+.chk { width: 2rem; text-align: center; }
+.chk input { width: auto; cursor: pointer; }
+#txRows tr[data-id] { cursor: pointer; }
+#txRows tr.row-checked td { background: #fefce8; }
+.sel-summary { color: var(--accent-dark); font-weight: 700; }
+
+/* 검색(필터) 입력 */
+.section-head .date-filter { flex: 0 1 auto; width: auto; }
+.section-head input[type="search"]#fProduct { flex: 1 1 130px; min-width: 8rem; }
+.range-sep { align-self: center; color: var(--sub); }
+#btnClearFilter { color: var(--sub); }
+
 /* 장부 시트 빠른 입력 행 */
 .entry-row td { background: #eff6ff; padding: 0.35rem 0.25rem; }
 .entry-row input, .entry-row select { padding: 0.4rem 0.5rem; font-size: 0.88rem; }

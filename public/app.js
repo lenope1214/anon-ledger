@@ -16,6 +16,9 @@ const state = {
   entryVat: 'separate', // 빠른 입력 행의 부가세 방식
   entryDate: '',        // 빠른 입력 행에서 마지막으로 쓴 날짜
   entryCompanyId: '',   // 빠른 입력 행에서 마지막으로 쓴 상호
+  txFrom: '',           // 거래 필터: 시작일
+  txTo: '',             // 거래 필터: 종료일
+  txProductQuery: '',   // 거래 필터: 품명 검색어
 };
 try {
   const savedVat = localStorage.getItem('entryVat');
@@ -446,6 +449,8 @@ function attachProductAutocomplete(input, getCompanyId, onPick) {
 
 /* ─────────────── 거래관리 (장부 시트) ─────────────── */
 let txCache = [];
+let checkedTxIds = new Set(); // 체크된 거래 id (새로고침 전까지 유지)
+let sheetLastIdx = null;      // 마지막으로 체크한 행 위치 ('=' 연속 체크용)
 
 async function renderTransactions() {
   await refreshCompanies();
@@ -462,18 +467,24 @@ async function renderTransactions() {
           <option value="">전체 상호</option>
           ${state.companies.map((c) => `<option value="${c.id}" ${String(c.id) === state.txCompanyId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
         </select>
+        <input type="date" id="fFrom" class="date-filter" value="${esc(state.txFrom)}" title="시작일">
+        <span class="range-sep">~</span>
+        <input type="date" id="fTo" class="date-filter" value="${esc(state.txTo)}" title="종료일">
+        <input type="search" id="fProduct" placeholder="품명 검색" value="${esc(state.txProductQuery)}">
+        <button id="btnClearFilter" title="검색 조건 초기화">초기화</button>
         <select id="entryVat" class="vat-select" title="빠른 입력 부가세 방식">
           ${Object.entries(VAT_LABEL).map(([v, l]) => `<option value="${v}" ${v === state.entryVat ? 'selected' : ''}>${l}</option>`).join('')}
         </select>
         <button id="btnAddTx">＋ 여러 품목 거래</button>
       </div>
-      <p id="txSummary" class="summary"></p>
-      <div class="table-wrap">
+      <p class="summary"><span id="txSummary"></span><span id="selSummary" class="sel-summary"></span></p>
+      <div class="table-wrap ledger-wrap">
         <table class="ledger-table">
-          <thead><tr><th>날짜</th><th>상호</th><th>품명</th><th>규격</th><th class="num">수량</th><th class="num">단가</th><th class="num">공급가액</th><th class="num">합계</th><th class="num">세액</th><th class="num">입금</th><th class="num">잔액</th><th class="actions"></th></tr></thead>
+          <thead><tr><th class="chk"></th><th>날짜</th><th>상호</th><th>품명</th><th>규격</th><th class="num">수량</th><th class="num">단가</th><th class="num">공급가액</th><th class="num">합계</th><th class="num">세액</th><th class="num">입금</th><th class="num">잔액</th><th class="actions"></th></tr></thead>
           <tbody id="txRows"></tbody>
           <tbody>
             <tr class="entry-row">
+              <td class="chk"></td>
               <td><input type="date" id="eDate" value="${esc(state.entryDate || today())}"></td>
               <td><input id="eCompany" placeholder="상호 검색" autocomplete="off"></td>
               <td><input id="eName" placeholder="품명 입력" autocomplete="off"></td>
@@ -492,7 +503,7 @@ async function renderTransactions() {
       </div>
       <p class="hint">맨 아래 파란 행에 적고 Enter(또는 저장)를 누르면 바로 기록됩니다.
       품명을 입력하면 등록된 제품이 힌트로 나타나며, 적은 품명·규격·단가는 제품관리에 자동 등록됩니다.
-      <b>=</b> 키를 누르면 단가·합계의 부호가 + ⇄ − 로 바뀝니다 (반품·차감 입력).</p>
+      <b>=</b> 키: 입력 중엔 단가 부호 토글(+ ⇄ −), 행을 클릭한 뒤엔 다음 행 연속 체크.</p>
     </section>`;
 
   const eCompany = $('#eCompany');
@@ -532,6 +543,31 @@ async function renderTransactions() {
     if (c) setEntryCompany(c);
     drawTxRows();
   });
+  $('#fFrom').addEventListener('change', (e) => {
+    state.txFrom = e.target.value;
+    drawTxRows();
+  });
+  $('#fTo').addEventListener('change', (e) => {
+    state.txTo = e.target.value;
+    drawTxRows();
+  });
+  let productFilterTimer = null;
+  $('#fProduct').addEventListener('input', (e) => {
+    state.txProductQuery = e.target.value;
+    clearTimeout(productFilterTimer);
+    productFilterTimer = setTimeout(drawTxRows, 250);
+  });
+  $('#btnClearFilter').addEventListener('click', () => {
+    state.txCompanyId = '';
+    state.txFrom = '';
+    state.txTo = '';
+    state.txProductQuery = '';
+    $('#txCompany').value = '';
+    $('#fFrom').value = '';
+    $('#fTo').value = '';
+    $('#fProduct').value = '';
+    drawTxRows();
+  });
   $('#entryVat').addEventListener('change', (e) => {
     state.entryVat = e.target.value;
     try {
@@ -569,7 +605,12 @@ async function renderTransactions() {
   });
   recomputeEntry();
   await drawTxRows();
-  window.scrollTo({ top: document.body.scrollHeight });
+  scrollSheetToBottom();
+}
+
+function scrollSheetToBottom() {
+  const wrap = $('.ledger-wrap');
+  if (wrap) wrap.scrollTop = wrap.scrollHeight;
 }
 
 function recomputeEntry() {
@@ -619,7 +660,7 @@ async function saveEntry() {
   $('#ePaid').value = '';
   await drawTxRows();
   toast('저장했습니다.');
-  window.scrollTo({ top: document.body.scrollHeight });
+  scrollSheetToBottom();
   $('#eName').focus();
 }
 
@@ -627,20 +668,32 @@ async function drawTxRows() {
   txCache = await api('GET', '/api/transactions' + (state.txCompanyId ? '?companyId=' + state.txCompanyId : ''));
   const tbody = $('#txRows');
   if (!tbody) return;
-  const total = txCache.reduce((s, t) => s + t.total, 0);
-  const paid = txCache.reduce((s, t) => s + t.paid, 0);
-  $('#txSummary').textContent = `${txCache.length}건 · 합계 ${won(total)}원 · 입금 ${won(paid)}원 · 잔액 ${won(total - paid)}원`;
-  const rows = [...txCache].sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id); // 옛날 → 최신
+
+  // 날짜 범위·품명 검색 필터 (화면에서 걸러냄)
+  let list = txCache;
+  if (state.txFrom) list = list.filter((t) => t.date >= state.txFrom);
+  if (state.txTo) list = list.filter((t) => t.date <= state.txTo);
+  const q = state.txProductQuery.trim().toLowerCase();
+  if (q) list = list.filter((t) => t.items.some((it) => it.name.toLowerCase().includes(q)));
+
+  const total = list.reduce((s, t) => s + t.total, 0);
+  const paid = list.reduce((s, t) => s + t.paid, 0);
+  $('#txSummary').textContent = `${list.length}건 · 합계 ${won(total)}원 · 입금 ${won(paid)}원 · 잔액 ${won(total - paid)}원`;
+  updateSelSummary();
+
+  const rows = [...list].sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id); // 옛날 → 최신
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="12" class="empty-cell">아직 거래가 없습니다. 아래 파란 입력 행에서 첫 거래를 적어보세요.</td></tr>';
+    tbody.innerHTML = `<tr><td colspan="13" class="empty-cell">${txCache.length ? '검색 조건에 맞는 거래가 없습니다.' : '아직 거래가 없습니다. 아래 파란 입력 행에서 첫 거래를 적어보세요.'}</td></tr>`;
     return;
   }
   tbody.innerHTML = rows
-    .map((t) => {
+    .map((t, i) => {
       const single = t.items.length === 1;
       const it = t.items[0];
       const balance = t.total - t.paid;
-      return `<tr>
+      const checked = checkedTxIds.has(t.id);
+      return `<tr data-id="${t.id}" data-idx="${i}" class="${checked ? 'row-checked' : ''}">
+        <td class="chk"><input type="checkbox" ${checked ? 'checked' : ''}></td>
         <td>${esc(t.date)}</td>
         <td><b>${esc(t.companyName)}</b></td>
         <td>${esc(it.name)}${single ? '' : ` <span class="sub">외 ${t.items.length - 1}건</span>`}${t.memo ? `<div class="sub">${esc(t.memo)}</div>` : ''}</td>
@@ -662,20 +715,74 @@ async function drawTxRows() {
     .join('');
   tbody.onclick = async (e) => {
     const btn = e.target.closest('button[data-act]');
-    if (!btn) return;
-    const id = Number(btn.dataset.id);
-    const t = txCache.find((x) => x.id === id);
-    if (!t) return;
-    if (btn.dataset.act === 'sheet') openStatement(t);
-    else if (btn.dataset.act === 'edit') openTxForm(t);
-    else if (btn.dataset.act === 'del') {
-      if (!confirm(`${t.date} '${t.companyName}' 거래를 삭제할까요?`)) return;
-      await api('DELETE', '/api/transactions/' + id);
-      toast('거래를 삭제했습니다.');
-      drawTxRows();
+    if (btn) {
+      const id = Number(btn.dataset.id);
+      const t = txCache.find((x) => x.id === id);
+      if (!t) return;
+      if (btn.dataset.act === 'sheet') openStatement(t);
+      else if (btn.dataset.act === 'edit') openTxForm(t);
+      else if (btn.dataset.act === 'del') {
+        if (!confirm(`${t.date} '${t.companyName}' 거래를 삭제할까요?`)) return;
+        await api('DELETE', '/api/transactions/' + id);
+        checkedTxIds.delete(id);
+        toast('거래를 삭제했습니다.');
+        drawTxRows();
+      }
+      return;
     }
+    // 행 아무 곳이나 누르면 체크 토글
+    const tr = e.target.closest('tr[data-id]');
+    if (!tr) return;
+    const cb = tr.querySelector('input[type="checkbox"]');
+    if (!cb) return;
+    if (e.target !== cb) cb.checked = !cb.checked;
+    const id = Number(tr.dataset.id);
+    if (cb.checked) checkedTxIds.add(id);
+    else checkedTxIds.delete(id);
+    tr.classList.toggle('row-checked', cb.checked);
+    sheetLastIdx = Number(tr.dataset.idx);
+    updateSelSummary();
   };
 }
+
+// 체크된 거래의 소계 표시
+function updateSelSummary() {
+  const el = $('#selSummary');
+  if (!el) return;
+  const sel = txCache.filter((t) => checkedTxIds.has(t.id));
+  if (!sel.length) {
+    el.textContent = '';
+    return;
+  }
+  const total = sel.reduce((s, t) => s + t.total, 0);
+  const paid = sel.reduce((s, t) => s + t.paid, 0);
+  el.textContent = ` · ☑ 선택 ${sel.length}건: 합계 ${won(total)}원 · 입금 ${won(paid)}원 · 잔액 ${won(total - paid)}원`;
+}
+
+// '=' 연속 체크: 마지막으로 체크한 행의 다음 행을 체크 (키를 누르고 있으면 반복)
+function checkNextRow() {
+  if (sheetLastIdx == null) return;
+  const rows = $$('#txRows tr[data-id]');
+  const next = rows[sheetLastIdx + 1];
+  if (!next) return;
+  sheetLastIdx += 1;
+  const cb = next.querySelector('input[type="checkbox"]');
+  if (cb && !cb.checked) {
+    cb.checked = true;
+    checkedTxIds.add(Number(next.dataset.id));
+    next.classList.add('row-checked');
+  }
+  next.scrollIntoView({ block: 'nearest' });
+  updateSelSummary();
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.key !== '=' || state.tab !== 'transactions') return;
+  if (e.target.closest('input, select, textarea')) return; // 입력 중일 땐 부호 토글이 우선
+  if (!$('#modal').classList.contains('hidden')) return;
+  e.preventDefault();
+  checkNextRow();
+});
 
 /* ── 거래 입력/수정 폼 ── */
 async function openTxForm(tx) {
