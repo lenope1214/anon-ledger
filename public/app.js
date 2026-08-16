@@ -497,7 +497,7 @@ async function renderTransactions() {
               <td class="chk"></td>
               <td><input type="date" id="eDate" value="${esc(state.entryDate || today())}"></td>
               <td><input id="eCompany" placeholder="상호 입력·검색" autocomplete="off"></td>
-              <td><input id="eName" placeholder="품명 입력" autocomplete="off"></td>
+              <td><input id="eName" placeholder="품명 (비우면 이전 품목)" autocomplete="off"></td>
               <td><input id="eSpec" placeholder="규격"></td>
               <td><input id="eQty" type="number" inputmode="decimal" step="any" value="1"></td>
               <td><input id="ePrice" type="number" inputmode="numeric" placeholder="단가"></td>
@@ -513,6 +513,7 @@ async function renderTransactions() {
       </div>
       <p class="hint sheet-hint">
         <span><b>Enter</b> 저장</span>
+        <span><b>품명 비우고 Enter</b> 이전 품목 그대로</span>
         <span><b>=</b> 부호 토글 · 연속 체크</span>
         <span><b>−</b> 건너뛰기</span>
         <span><b>Backspace</b> 되돌리기</span>
@@ -589,8 +590,20 @@ async function renderTransactions() {
   });
   $('#btnAddTx').addEventListener('click', () => openTxForm(null));
   $('#btnEasyOn').addEventListener('click', () => setEasyMode(true));
-  $('#eQty').addEventListener('input', recomputeEntry);
+  $('#eQty').addEventListener('input', () => {
+    state.entryQtyTouched = true;
+    recomputeEntry();
+  });
   $('#ePrice').addEventListener('input', recomputeEntry);
+  // 품명을 비운 채 다음 칸으로 넘어가면 이전 품목을 그대로 채워 준다
+  $('#eName').addEventListener('blur', () => {
+    setTimeout(() => {
+      if ($('#eName') && !$('#eName').value.trim() && fillFromLastItem($('#eName'), $('#eSpec'), $('#ePrice'), $('#eQty'))) {
+        recomputeEntry();
+        toast('이전 품목을 불러왔습니다.');
+      }
+    }, 180); // 자동완성 힌트를 고르는 중이면 건너뛰도록 잠깐 기다린다
+  });
   attachProductAutocomplete($('#eName'), () => state.entryCompanyId, (p) => {
     $('#eName').value = p.name;
     $('#eSpec').value = p.spec;
@@ -647,7 +660,8 @@ async function renderTransactionsEasy() {
         <h2>거래 적기</h2>
         <button type="button" id="btnEasyOff">일반 화면</button>
       </div>
-      <p class="easy-guide">아래 칸을 위에서부터 하나씩 채우고 맨 아래 <b>[저장하기]</b>를 누르세요.</p>
+      <p class="easy-guide">아래 칸을 위에서부터 하나씩 채우고 맨 아래 <b>[저장하기]</b>를 누르세요.<br>
+      같은 걸 또 적을 땐 품명을 <b>비워두고</b> 저장하면 직전 품목이 그대로 들어갑니다.</p>
       <form id="easyForm" autocomplete="off">
         <div class="easy-field">
           <span class="easy-label">날짜</span>
@@ -660,6 +674,7 @@ async function renderTransactionsEasy() {
         <div class="easy-field">
           <span class="easy-label">품명</span>
           <input id="xName" placeholder="예: 식대">
+          <button type="button" id="xSame" class="sign-btn">직전에 적은 것과 같게</button>
         </div>
         <div class="easy-field">
           <span class="easy-label">수량</span>
@@ -717,11 +732,29 @@ async function renderTransactionsEasy() {
     easyRecompute();
   });
 
+  $('#xSame').addEventListener('click', () => {
+    if (fillFromLastItem($('#xName'), null, $('#xPrice'), $('#xQty'))) {
+      easyRecompute();
+      toast('직전 품목을 불러왔습니다.');
+    } else {
+      toast('아직 적은 거래가 없습니다.');
+    }
+  });
+  $('#xName').addEventListener('blur', () => {
+    setTimeout(() => {
+      if ($('#xName') && !$('#xName').value.trim() && fillFromLastItem($('#xName'), null, $('#xPrice'), $('#xQty'))) {
+        easyRecompute();
+        toast('이전 품목을 불러왔습니다.');
+      }
+    }, 180);
+  });
+
   $$('.step-btn').forEach((btn) =>
     btn.addEventListener('click', () => {
       const el = $('#xQty');
       const next = (Number(el.value) || 0) + Number(btn.dataset.step);
       el.value = next < 0 ? 0 : next;
+      state.entryQtyTouched = true;
       easyRecompute();
     })
   );
@@ -733,7 +766,10 @@ async function renderTransactionsEasy() {
       easyRecompute();
     }
   });
-  $('#xQty').addEventListener('input', easyRecompute);
+  $('#xQty').addEventListener('input', () => {
+    state.entryQtyTouched = true;
+    easyRecompute();
+  });
   $('#xPrice').addEventListener('input', easyRecompute);
   $('#xVat').addEventListener('change', (e) => {
     state.entryVat = e.target.value;
@@ -767,7 +803,14 @@ async function saveEasyEntry() {
     $('#xCompany').focus();
     return;
   }
-  const name = $('#xName').value.trim();
+  let name = $('#xName').value.trim();
+  if (!name) {
+    // 품명이 비어 있으면 직전 품목을 그대로 적용한다
+    if (fillFromLastItem($('#xName'), null, $('#xPrice'), $('#xQty'))) {
+      easyRecompute();
+      name = $('#xName').value.trim();
+    }
+  }
   if (!name) {
     alert('품명을 적어주세요.');
     $('#xName').focus();
@@ -790,6 +833,7 @@ async function saveEasyEntry() {
     return;
   }
   state.entryDate = body.date;
+  state.entryQtyTouched = false;
   clearProductsCache();
   await refreshCompanies();
   const saved = state.companies.find((c) => c.id === tx.companyId);
@@ -847,6 +891,28 @@ async function drawEasyList() {
   };
 }
 
+/* ─────────────── 이전 품목 그대로 적기 ─────────────── */
+// 품명을 비운 채 넘어가거나 저장하면 직전에 적은 품목을 그대로 불러온다.
+// 선택된 상호의 마지막 거래를 우선 쓰고, 없으면 전체 마지막 거래를 쓴다.
+function getLastItem() {
+  const cid = Number(state.entryCompanyId) || 0;
+  const src = (cid && txCache.find((t) => t.companyId === cid)) || txCache[0];
+  if (!src || !src.items.length) return null;
+  const it = src.items[src.items.length - 1];
+  return { name: it.name, spec: it.spec || '', price: it.price, qty: it.qty };
+}
+
+// 수량은 사용자가 직접 건드리지 않았을 때만 이전 값을 따라간다
+function fillFromLastItem(nameEl, specEl, priceEl, qtyEl) {
+  const last = getLastItem();
+  if (!last) return false;
+  nameEl.value = last.name;
+  if (specEl) specEl.value = last.spec;
+  priceEl.value = last.price;
+  if (qtyEl && !state.entryQtyTouched) qtyEl.value = last.qty;
+  return true;
+}
+
 function scrollSheetToBottom() {
   const wrap = $('.ledger-wrap');
   if (wrap) wrap.scrollTop = wrap.scrollHeight;
@@ -877,7 +943,14 @@ async function saveEntry() {
     $('#eCompany').focus();
     return;
   }
-  const name = $('#eName').value.trim();
+  let name = $('#eName').value.trim();
+  if (!name) {
+    // 품명이 비어 있으면 직전 품목을 그대로 적용한다
+    if (fillFromLastItem($('#eName'), $('#eSpec'), $('#ePrice'), $('#eQty'))) {
+      recomputeEntry();
+      name = $('#eName').value.trim();
+    }
+  }
   if (!name) {
     toast('품명을 입력하세요.');
     $('#eName').focus();
@@ -900,6 +973,7 @@ async function saveEntry() {
     return;
   }
   state.entryDate = body.date;
+  state.entryQtyTouched = false;
   clearProductsCache(); // 자동 등록된 제품이 힌트에 바로 나오도록
   await refreshCompanies(); // 자동 등록된 상호가 검색에 바로 나오도록
   const savedCompany = state.companies.find((c) => c.id === tx.companyId);
@@ -1762,7 +1836,7 @@ const TOUR_STEPS = [
   {
     sel: '#eName',
     title: '품명도 자동으로 쌓입니다',
-    body: '몇 글자 치면 그 상호에서 팔던 제품이 힌트로 뜹니다. 골라 쓰면 규격·단가가 자동으로 채워집니다. 새 품명은 적는 순간 제품으로 등록되고, 단가를 바꿔 적으면 최신 단가로 갱신됩니다.',
+    body: '몇 글자 치면 그 상호에서 팔던 제품이 힌트로 뜹니다. 골라 쓰면 규격·단가가 자동으로 채워집니다. 새 품명은 적는 순간 제품으로 등록되고, 단가를 바꿔 적으면 최신 단가로 갱신됩니다. 같은 걸 또 적을 땐 품명을 비운 채 Enter만 눌러도 직전 품목이 그대로 들어갑니다.',
     pos: 'top',
   },
   {
