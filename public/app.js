@@ -20,9 +20,11 @@ const state = {
   txTo: '',             // 거래 필터: 종료일
   txProductQuery: '',   // 거래 필터: 품명 검색어
 };
+state.easyMode = false; // 큰 글씨 간편 입력 (휴대폰·어르신용)
 try {
   const savedVat = localStorage.getItem('entryVat');
   if (savedVat && ['separate', 'included', 'none'].includes(savedVat)) state.entryVat = savedVat;
+  state.easyMode = localStorage.getItem('easyMode') === '1';
 } catch (e) { /* localStorage 사용 불가 환경 */ }
 
 const VAT_LABEL = { separate: '부가세 별도', included: '부가세 포함', none: '부가세 없음' };
@@ -453,7 +455,18 @@ let txCache = [];
 let checkedTxIds = new Set(); // 체크된 거래 id (새로고침 전까지 유지)
 let sheetLastIdx = null;      // 마지막으로 체크한 행 위치 ('=' 연속 체크용)
 
+function setEasyMode(on) {
+  state.easyMode = on;
+  try {
+    localStorage.setItem('easyMode', on ? '1' : '0');
+  } catch (e) { /* 무시 */ }
+  document.body.classList.toggle('easy', on);
+  renderTransactions();
+}
+
 async function renderTransactions() {
+  document.body.classList.toggle('easy', state.easyMode);
+  if (state.easyMode) return renderTransactionsEasy();
   await refreshCompanies();
   const main = $('#main');
   main.innerHTML = `
@@ -472,6 +485,7 @@ async function renderTransactions() {
           ${Object.entries(VAT_LABEL).map(([v, l]) => `<option value="${v}" ${v === state.entryVat ? 'selected' : ''}>${l}</option>`).join('')}
         </select>
         <button id="btnAddTx">＋ 여러 품목 거래</button>
+        <button id="btnEasyOn" title="글씨를 크게 해서 하나씩 입력합니다">🔎 큰 글씨</button>
       </div>
       <p class="summary"><span id="txSummary"></span><span id="selSummary" class="sel-summary"></span></p>
       <div class="table-wrap ledger-wrap">
@@ -574,6 +588,7 @@ async function renderTransactions() {
     recomputeEntry();
   });
   $('#btnAddTx').addEventListener('click', () => openTxForm(null));
+  $('#btnEasyOn').addEventListener('click', () => setEasyMode(true));
   $('#eQty').addEventListener('input', recomputeEntry);
   $('#ePrice').addEventListener('input', recomputeEntry);
   attachProductAutocomplete($('#eName'), () => state.entryCompanyId, (p) => {
@@ -612,6 +627,7 @@ async function renderTransactions() {
 
 // 첫 방문(또는 안내를 끝까지 본 적 없는 경우)에 한 번만 자동으로 튜토리얼을 띄운다
 function maybeAutoTour() {
+  if (state.easyMode) return; // 큰 글씨 모드에는 안내 대상 요소가 없다
   let done = true;
   try {
     done = localStorage.getItem('tourDone') === '1';
@@ -620,6 +636,215 @@ function maybeAutoTour() {
   setTimeout(() => {
     if ($('.entry-row') && $('#tourOverlay').classList.contains('hidden')) startTour();
   }, 500);
+}
+
+/* ─────────────── 큰 글씨 간편 입력 ─────────────── */
+async function renderTransactionsEasy() {
+  await refreshCompanies();
+  $('#main').innerHTML = `
+    <section class="card easy-card">
+      <div class="easy-head">
+        <h2>거래 적기</h2>
+        <button type="button" id="btnEasyOff">일반 화면</button>
+      </div>
+      <p class="easy-guide">아래 칸을 위에서부터 하나씩 채우고 맨 아래 <b>[저장하기]</b>를 누르세요.</p>
+      <form id="easyForm" autocomplete="off">
+        <div class="easy-field">
+          <span class="easy-label">날짜</span>
+          <input type="date" id="xDate" value="${esc(state.entryDate || today())}">
+        </div>
+        <div class="easy-field">
+          <span class="easy-label">상호 (거래처)</span>
+          <input id="xCompany" placeholder="눌러서 고르거나 새로 적기">
+        </div>
+        <div class="easy-field">
+          <span class="easy-label">품명</span>
+          <input id="xName" placeholder="예: 식대">
+        </div>
+        <div class="easy-field">
+          <span class="easy-label">수량</span>
+          <div class="stepper">
+            <button type="button" class="step-btn" data-step="-1">－</button>
+            <input id="xQty" type="number" inputmode="decimal" step="any" value="1">
+            <button type="button" class="step-btn" data-step="1">＋</button>
+          </div>
+        </div>
+        <div class="easy-field">
+          <span class="easy-label">단가 (금액)</span>
+          <input id="xPrice" type="number" inputmode="numeric" placeholder="0">
+          <button type="button" id="xSign" class="sign-btn">＋ ↔ － 바꾸기</button>
+        </div>
+        <div class="easy-field">
+          <span class="easy-label">부가세</span>
+          <select id="xVat">
+            ${Object.entries(VAT_LABEL).map(([v, l]) => `<option value="${v}" ${v === state.entryVat ? 'selected' : ''}>${l}</option>`).join('')}
+          </select>
+        </div>
+        <div class="easy-field">
+          <span class="easy-label">받은 돈 (없으면 비워두세요)</span>
+          <input id="xPaid" type="number" inputmode="numeric" placeholder="0">
+        </div>
+        <p class="easy-total">합계 <b id="xTotal">0원</b></p>
+        <button type="submit" class="primary easy-save">저장하기</button>
+      </form>
+    </section>
+    <section class="card easy-card">
+      <h2 class="easy-recent-title">최근에 적은 거래</h2>
+      <div id="easyList"></div>
+    </section>`;
+
+  const xCompany = $('#xCompany');
+  const preferred = state.companies.find((c) => String(c.id) === String(state.entryCompanyId));
+  if (preferred) xCompany.value = preferred.name;
+
+  attachSearchDropdown(xCompany, {
+    minChars: 0,
+    enterPicksFirst: true,
+    getItems: async (q) => state.companies.filter((c) => !q || c.name.toLowerCase().includes(q)),
+    itemHtml: (c) => `<b>${esc(c.name)}</b>${c.owner ? `<span class="sub">${esc(c.owner)}</span>` : ''}`,
+    onPick: (c) => {
+      state.entryCompanyId = String(c.id);
+      xCompany.value = c.name;
+      $('#xName').focus();
+    },
+  });
+  xCompany.addEventListener('input', () => {
+    state.entryCompanyId = ''; // 이름을 고치면 새 상호로 취급 (없으면 자동 등록)
+  });
+  attachProductAutocomplete($('#xName'), () => state.entryCompanyId, (p) => {
+    $('#xName').value = p.name;
+    $('#xPrice').value = p.price;
+    easyRecompute();
+  });
+
+  $$('.step-btn').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const el = $('#xQty');
+      const next = (Number(el.value) || 0) + Number(btn.dataset.step);
+      el.value = next < 0 ? 0 : next;
+      easyRecompute();
+    })
+  );
+  $('#xSign').addEventListener('click', () => {
+    const el = $('#xPrice');
+    const v = Number(el.value) || 0;
+    if (v !== 0) {
+      el.value = -v;
+      easyRecompute();
+    }
+  });
+  $('#xQty').addEventListener('input', easyRecompute);
+  $('#xPrice').addEventListener('input', easyRecompute);
+  $('#xVat').addEventListener('change', (e) => {
+    state.entryVat = e.target.value;
+    try {
+      localStorage.setItem('entryVat', e.target.value);
+    } catch (err) { /* 무시 */ }
+    easyRecompute();
+  });
+  $('#btnEasyOff').addEventListener('click', () => setEasyMode(false));
+  $('#easyForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    saveEasyEntry();
+  });
+
+  easyRecompute();
+  await drawEasyList();
+}
+
+function easyRecompute() {
+  if (!$('#xQty')) return;
+  const r = calcItem(Number($('#xQty').value) || 0, Number($('#xPrice').value) || 0, state.entryVat);
+  const total = r.supply + r.tax;
+  $('#xTotal').textContent = won(total) + '원';
+  $('#xTotal').classList.toggle('neg', total < 0);
+}
+
+async function saveEasyEntry() {
+  const companyName = $('#xCompany').value.trim();
+  if (!state.entryCompanyId && !companyName) {
+    alert('상호를 적어주세요.');
+    $('#xCompany').focus();
+    return;
+  }
+  const name = $('#xName').value.trim();
+  if (!name) {
+    alert('품명을 적어주세요.');
+    $('#xName').focus();
+    return;
+  }
+  const body = {
+    companyId: Number(state.entryCompanyId) || 0,
+    companyName,
+    date: $('#xDate').value || today(),
+    vatMode: state.entryVat,
+    items: [{ name, spec: '', qty: Number($('#xQty').value) || 0, price: Number($('#xPrice').value) || 0 }],
+    paid: Number($('#xPaid').value) || 0,
+    memo: '',
+  };
+  let tx;
+  try {
+    tx = await api('POST', '/api/transactions', body);
+  } catch (err) {
+    alert(err.message);
+    return;
+  }
+  state.entryDate = body.date;
+  clearProductsCache();
+  await refreshCompanies();
+  const saved = state.companies.find((c) => c.id === tx.companyId);
+  if (saved) {
+    state.entryCompanyId = String(saved.id);
+    $('#xCompany').value = saved.name;
+  }
+  $('#xName').value = '';
+  $('#xQty').value = 1;
+  $('#xPrice').value = '';
+  $('#xPaid').value = '';
+  easyRecompute();
+  toast('저장했습니다.');
+  await drawEasyList();
+  $('#xName').focus();
+}
+
+async function drawEasyList() {
+  txCache = await api('GET', '/api/transactions');
+  const box = $('#easyList');
+  if (!box) return;
+  const rows = txCache.slice(0, 15); // 최신순 15건
+  if (!rows.length) {
+    box.innerHTML = '<p class="empty-cell">아직 적은 거래가 없습니다.</p>';
+    return;
+  }
+  box.innerHTML = rows
+    .map((t) => {
+      const it = t.items[0];
+      const more = t.items.length > 1 ? ` 외 ${t.items.length - 1}건` : '';
+      return `<div class="easy-item" data-id="${t.id}">
+        <div class="easy-item-head"><b>${esc(t.companyName)}</b><span>${esc(t.date)}</span></div>
+        <div class="easy-item-name">${esc(it.name)}${more}</div>
+        <div class="easy-item-foot">
+          <b class="${t.total < 0 ? 'neg' : ''}">${won(t.total)}원</b>
+          <button type="button" data-act="sheet">명세표</button>
+          <button type="button" data-act="del" class="danger">삭제</button>
+        </div>
+      </div>`;
+    })
+    .join('');
+  box.onclick = async (e) => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const id = Number(btn.closest('.easy-item').dataset.id);
+    const t = txCache.find((x) => x.id === id);
+    if (!t) return;
+    if (btn.dataset.act === 'sheet') openStatement(t);
+    else if (btn.dataset.act === 'del') {
+      if (!confirm(`${t.date} '${t.companyName}' 거래를 지울까요?`)) return;
+      await api('DELETE', '/api/transactions/' + id);
+      toast('지웠습니다.');
+      drawEasyList();
+    }
+  };
 }
 
 function scrollSheetToBottom() {
@@ -1590,6 +1815,10 @@ function tourVisible(sel) {
 }
 
 function startTour() {
+  if (state.easyMode) {
+    alert('큰 글씨 모드에서는 화면 그대로 하나씩 적으면 됩니다.\n날짜 → 상호 → 품명 → 수량 → 단가를 채우고 [저장하기]를 누르세요.');
+    return;
+  }
   if (state.tab !== 'transactions') {
     const btn = $('#tabs button[data-tab="transactions"]');
     if (btn) btn.click();
