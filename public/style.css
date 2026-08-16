@@ -437,6 +437,18 @@ body.sheet-open .fab { display: none; }
 .sheet-memo { font-size: 0.85rem; margin-bottom: 0.6rem; }
 .sheet-sign { text-align: right; margin-top: 1.2rem; }
 
+/* 명세표의 공급받는자 입력칸 — 화면에선 살짝 표시, 인쇄 땐 일반 글자처럼 */
+.party-input {
+  width: 100%;
+  border: none;
+  border-bottom: 1px dashed var(--line);
+  border-radius: 0;
+  padding: 0.1rem 0.15rem;
+  font-size: inherit;
+  background: #fbfdff;
+}
+.party-input:focus { outline: none; border-bottom: 1px solid var(--accent); background: #eff6ff; }
+
 /* ─────────────── 인쇄 ─────────────── */
 @media print {
   body.printing #topbar,
@@ -456,6 +468,7 @@ body.sheet-open .fab { display: none; }
 
   body.printing .print-wrap { max-width: none; }
   body.printing .sheet { border-radius: 0; padding: 0; }
+  body.printing .party-input { border: none; background: none; }
 }
 
 /* ─────────────── 모바일 ─────────────── */
