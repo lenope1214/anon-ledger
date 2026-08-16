@@ -1357,6 +1357,9 @@ $('#btnLogout').addEventListener('click', async () => {
 });
 
 (async function init() {
+  api('GET', '/api/version')
+    .then((v) => { $('#verFooter').textContent = `거래장부 v${v.version} · ${v.commit}`; })
+    .catch(() => {});
   const hash = location.hash.slice(1);
   if (['companies', 'products', 'transactions', 'settings', 'admin'].includes(hash)) {
     state.tab = hash;

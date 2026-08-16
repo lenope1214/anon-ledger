@@ -54,7 +54,11 @@ function serveStatic(req, res, p) {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
       return res.end('Not Found');
     }
-    res.writeHead(200, { 'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream' });
+    res.writeHead(200, {
+      'Content-Type': MIME[path.extname(file).toLowerCase()] || 'application/octet-stream',
+      // 항상 서버에 최신 여부를 확인하게 해서 배포 후 옛 화면이 남지 않게 한다
+      'Cache-Control': 'no-cache',
+    });
     res.end(buf);
   });
 }

@@ -22,6 +22,7 @@
     <button type="submit" class="primary login-btn" id="loginBtn">로그인</button>
   </form>
   <p class="hint login-hint" id="modeHint">계정이 없다면 [회원가입]으로 새 장부를 만드세요.<br>계정마다 완전히 분리된 자기 장부를 갖습니다.</p>
+  <p id="verFooter" class="ver-footer"></p>
 </div>
 <script>
 (async () => {
@@ -40,6 +41,11 @@
       $('#pw').focus();
     }
   } catch (e) { /* localStorage 사용 불가 환경 */ }
+
+  fetch('/api/version')
+    .then((r) => r.json())
+    .then((v) => { $('#verFooter').textContent = `거래장부 v${v.version} · ${v.commit}`; })
+    .catch(() => {});
 
   function setMode(next) {
     mode = next;
