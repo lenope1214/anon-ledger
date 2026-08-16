@@ -206,6 +206,7 @@ form label input, form label select { margin-top: 0.2rem; font-weight: 400; }
 .chk input { width: auto; cursor: pointer; }
 #txRows tr[data-id] { cursor: pointer; }
 #txRows tr.row-checked td { background: #fefce8; }
+#txRows tr.row-pointer { outline: 2px solid var(--accent); outline-offset: -2px; }
 .sel-summary { color: var(--accent-dark); font-weight: 700; }
 
 /* 검색(필터) 입력 */

@@ -504,7 +504,8 @@ async function renderTransactions() {
       </div>
       <p class="hint">맨 아래 파란 행에 적고 Enter(또는 저장)를 누르면 바로 기록됩니다.
       품명을 입력하면 등록된 제품이 힌트로 나타나며, 적은 품명·규격·단가는 제품관리에 자동 등록됩니다.
-      <b>=</b> 키: 입력 중엔 단가 부호 토글(+ ⇄ −), 행을 클릭한 뒤엔 다음 행 연속 체크.
+      <b>=</b> 키: 입력 중엔 단가 부호 토글(+ ⇄ −), 행을 클릭한 뒤엔 다음 행 연속 체크
+      (<b>−</b> 건너뛰기 · <b>Backspace</b> 되돌리기).
       <b>ESC</b> 키(또는 오른쪽 아래 🔍): 상호·제품 빠른 검색.</p>
       <button type="button" class="fab" id="btnQuickSearch" title="빠른 검색 (ESC)">🔍 검색</button>
     </section>`;
@@ -747,8 +748,10 @@ async function drawTxRows() {
     else checkedTxIds.delete(id);
     tr.classList.toggle('row-checked', cb.checked);
     sheetLastIdx = Number(tr.dataset.idx);
+    updatePointerHighlight();
     updateSelSummary();
   };
+  updatePointerHighlight();
 }
 
 // 체크된 거래의 소계 표시
@@ -765,7 +768,16 @@ function updateSelSummary() {
   el.textContent = ` · ☑ 선택 ${sel.length}건: 합계 ${won(total)}원 · 입금 ${won(paid)}원 · 잔액 ${won(total - paid)}원`;
 }
 
-// '=' 연속 체크: 마지막으로 체크한 행의 다음 행을 체크 (키를 누르고 있으면 반복)
+// 포인터(현재 위치) 행 표시 — 어느 행에서 이어갈지 파란 테두리로 보여준다
+function updatePointerHighlight() {
+  const rows = $$('#txRows tr[data-id]');
+  rows.forEach((tr) => tr.classList.remove('row-pointer'));
+  if (sheetLastIdx != null && sheetLastIdx >= 0 && rows[sheetLastIdx]) {
+    rows[sheetLastIdx].classList.add('row-pointer');
+  }
+}
+
+// '=' 연속 체크: 포인터의 다음 행을 체크 (키를 누르고 있으면 반복)
 function checkNextRow() {
   if (sheetLastIdx == null) return;
   const rows = $$('#txRows tr[data-id]');
@@ -779,15 +791,48 @@ function checkNextRow() {
     next.classList.add('row-checked');
   }
   next.scrollIntoView({ block: 'nearest' });
+  updatePointerHighlight();
+  updateSelSummary();
+}
+
+// '-' 건너뛰기: 체크하지 않고 포인터만 다음 행으로
+function skipNextRow() {
+  if (sheetLastIdx == null) return;
+  const rows = $$('#txRows tr[data-id]');
+  const next = rows[sheetLastIdx + 1];
+  if (!next) return;
+  sheetLastIdx += 1;
+  next.scrollIntoView({ block: 'nearest' });
+  updatePointerHighlight();
+}
+
+// Backspace 되돌리기: 포인터 행의 체크를 풀고 포인터를 한 칸 위로 (연타 가능)
+function undoCheckRow() {
+  if (sheetLastIdx == null || sheetLastIdx < 0) return;
+  const rows = $$('#txRows tr[data-id]');
+  const cur = rows[sheetLastIdx];
+  if (!cur) return;
+  const cb = cur.querySelector('input[type="checkbox"]');
+  if (cb && cb.checked) {
+    cb.checked = false;
+    checkedTxIds.delete(Number(cur.dataset.id));
+    cur.classList.remove('row-checked');
+  }
+  sheetLastIdx -= 1; // -1이 되면 '첫 행 이전' 상태 — 다음 '='는 첫 행부터 체크
+  if (sheetLastIdx >= 0) rows[sheetLastIdx].scrollIntoView({ block: 'nearest' });
+  updatePointerHighlight();
   updateSelSummary();
 }
 
 document.addEventListener('keydown', (e) => {
-  if (e.key !== '=' || state.tab !== 'transactions') return;
-  if (e.target.closest('input, select, textarea')) return; // 입력 중일 땐 부호 토글이 우선
+  if (state.tab !== 'transactions') return;
+  if (e.key !== '=' && e.key !== '-' && e.key !== 'Backspace') return;
+  if (e.target.closest('input, select, textarea')) return; // 입력 중일 땐 원래 동작 유지
   if (!$('#modal').classList.contains('hidden')) return;
   e.preventDefault();
-  checkNextRow();
+  if (e.key === '=') checkNextRow();
+  else if (e.key === '-') skipNextRow();
+  else undoCheckRow();
 });
 
 /* ─────────────── 빠른 검색 시트 (ESC / 🔍) ─────────────── */
