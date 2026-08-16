@@ -497,12 +497,16 @@ async function renderTransactions() {
           </tbody>
         </table>
       </div>
-      <p class="hint">맨 아래 파란 행에 적고 Enter(또는 저장)를 누르면 바로 기록됩니다.
-      품명을 입력하면 등록된 제품이 힌트로 나타나며, 적은 품명·규격·단가는 제품관리에 자동 등록됩니다.
-      <b>=</b> 키: 입력 중엔 단가 부호 토글(+ ⇄ −), 행을 클릭한 뒤엔 다음 행 연속 체크
-      (<b>−</b> 건너뛰기 · <b>Backspace</b> 되돌리기).
-      <b>ESC</b> 키(또는 오른쪽 아래 🔍): 상호·제품 빠른 검색.</p>
+      <p class="hint sheet-hint">
+        <span><b>Enter</b> 저장</span>
+        <span><b>=</b> 부호 토글 · 연속 체크</span>
+        <span><b>−</b> 건너뛰기</span>
+        <span><b>Backspace</b> 되돌리기</span>
+        <span><b>ESC</b> 빠른 검색</span>
+        <button type="button" id="btnHelpInline" class="link-btn">자세한 사용법 보기</button>
+      </p>
       <button type="button" class="fab" id="btnQuickSearch" title="빠른 검색 (ESC)">🔍 검색</button>
+      <button type="button" class="fab fab-help" id="btnHelp" title="사용법 안내">?</button>
     </section>`;
 
   const eCompany = $('#eCompany');
@@ -581,6 +585,8 @@ async function renderTransactions() {
     $('#eQty').select();
   });
   $('#btnQuickSearch').addEventListener('click', toggleSearchSheet);
+  $('#btnHelp').addEventListener('click', startTour);
+  $('#btnHelpInline').addEventListener('click', startTour);
   $('#btnEntrySave').addEventListener('click', saveEntry);
   $('.entry-row').addEventListener('keydown', (e) => {
     if (e.target.tagName !== 'INPUT') return;
@@ -601,6 +607,19 @@ async function renderTransactions() {
   recomputeEntry();
   await drawTxRows();
   scrollSheetToBottom();
+  maybeAutoTour(); // 처음 온 사용자에게 사용법 안내
+}
+
+// 첫 방문(또는 안내를 끝까지 본 적 없는 경우)에 한 번만 자동으로 튜토리얼을 띄운다
+function maybeAutoTour() {
+  let done = true;
+  try {
+    done = localStorage.getItem('tourDone') === '1';
+  } catch (e) { /* localStorage 사용 불가 환경에선 띄우지 않음 */ }
+  if (done) return;
+  setTimeout(() => {
+    if ($('.entry-row') && $('#tourOverlay').classList.contains('hidden')) startTour();
+  }, 500);
 }
 
 function scrollSheetToBottom() {
@@ -873,7 +892,7 @@ function ssSetTab(tab) {
   ss.tab = tab;
   $('#ssTabCompany').classList.toggle('active', tab === 'company');
   $('#ssTabProduct').classList.toggle('active', tab === 'product');
-  $('#ssInput').placeholder = tab === 'company' ? '상호명·대표자 검색' : '품명·규격 검색 (전체 상호)';
+  $('#ssInput').placeholder = tab === 'company' ? '상호명·대표자 검색 (아래에서 바로 수정 가능)' : '품명·규격 검색 (전체 상호)';
   ssUpdate();
   $('#ssInput').focus();
 }
@@ -900,34 +919,103 @@ async function ssUpdate() {
   ssRender();
 }
 
+const COMPANY_FIELDS = [
+  { f: 'name', label: '상호명', cls: 'w-name' },
+  { f: 'owner', label: '대표자명', cls: 'w-owner' },
+  { f: 'bizNo', label: '사업자번호', cls: 'w-biz', ph: '000-00-00000' },
+  { f: 'phone', label: '연락처', cls: 'w-phone' },
+  { f: 'address', label: '주소', cls: 'w-addr' },
+];
+
 function ssRender() {
   const box = $('#ssResults');
   if (!ss.items.length) {
     box.innerHTML = '<p class="empty-cell">검색 결과가 없습니다.</p>';
     return;
   }
-  box.innerHTML = ss.items
-    .map((it, i) =>
-      ss.tab === 'company'
-        ? `<div class="ss-item ${i === ss.sel ? 'sel' : ''}" data-i="${i}">
-            <b>${esc(it.name)}</b>${it.owner ? `<span class="sub">${esc(it.owner)}</span>` : ''}
-            <span class="right ${it.outstanding > 0 ? 'warn' : ''}">미수 ${won(it.outstanding)}원</span>
-          </div>`
-        : `<div class="ss-item ${i === ss.sel ? 'sel' : ''}" data-i="${i}">
-            <b>${esc(it.name)}</b>${it.spec ? `<span class="sub">${esc(it.spec)}</span>` : ''}
-            <span class="sub">${esc(it.companyName)}</span>
-            <span class="right">${won(it.price)}원</span>
-          </div>`
-    )
-    .join('');
-  const selEl = box.querySelector('.ss-item.sel');
+  if (ss.tab === 'company') {
+    // 상호 정보를 입력칸으로 보여줘 그 자리에서 바로 고칠 수 있게 한다
+    box.innerHTML = `
+      <div class="ss-grid">
+        <div class="ss-grid-head">
+          ${COMPANY_FIELDS.map((c) => `<span class="${c.cls}">${c.label}</span>`).join('')}
+          <span class="w-out">미수금</span><span class="w-pick"></span>
+        </div>
+        ${ss.items
+          .map(
+            (c, i) => `<div class="ss-row ${i === ss.sel ? 'sel' : ''}" data-i="${i}" data-id="${c.id}">
+              ${COMPANY_FIELDS.map(
+                (col) => `<input class="${col.cls}" data-f="${col.f}" data-id="${c.id}" value="${esc(c[col.f])}" placeholder="${col.ph || col.label}">`
+              ).join('')}
+              <span class="w-out num ${c.outstanding > 0 ? 'warn' : ''}">${won(c.outstanding)}원</span>
+              <button type="button" class="w-pick primary ss-pick">선택</button>
+            </div>`
+          )
+          .join('')}
+      </div>`;
+    $$('.ss-row input', box).forEach((inp) => {
+      inp.addEventListener('change', () => saveCompanyField(inp));
+      inp.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          inp.blur(); // change가 먼저 발생해 저장된다
+        }
+      });
+    });
+  } else {
+    box.innerHTML = ss.items
+      .map(
+        (it, i) => `<div class="ss-item ${i === ss.sel ? 'sel' : ''}" data-i="${i}">
+          <b>${esc(it.name)}</b>${it.spec ? `<span class="sub">${esc(it.spec)}</span>` : ''}
+          <span class="sub">${esc(it.companyName)}</span>
+          <span class="right">${won(it.price)}원</span>
+        </div>`
+      )
+      .join('');
+  }
+  const selEl = box.querySelector('.ss-item.sel, .ss-row.sel');
   if (selEl) selEl.scrollIntoView({ block: 'nearest' });
-  box.querySelectorAll('.ss-item').forEach((el) => {
+  box.querySelectorAll('.ss-item, .ss-row').forEach((el) => {
     el.addEventListener('mousedown', (e) => {
+      if (e.target.tagName === 'INPUT') return; // 입력칸 클릭은 수정, 그 외는 선택
       e.preventDefault();
       ssPick(Number(el.dataset.i));
     });
   });
+}
+
+// 검색창에서 고친 상호 정보를 저장한다
+async function saveCompanyField(inp) {
+  const id = Number(inp.dataset.id);
+  const c = state.companies.find((x) => x.id === id);
+  if (!c) return;
+  const field = inp.dataset.f;
+  const value = inp.value.trim();
+  if (field === 'name' && !value) {
+    inp.value = c.name;
+    toast('상호명은 비울 수 없습니다.');
+    return;
+  }
+  if (c[field] === value) return;
+  const prev = c[field];
+  c[field] = value;
+  try {
+    await api('PUT', '/api/companies/' + id, {
+      name: c.name,
+      owner: c.owner || '',
+      bizNo: c.bizNo || '',
+      phone: c.phone || '',
+      address: c.address || '',
+      memo: c.memo || '',
+    });
+    toast('상호 정보를 저장했습니다.');
+    if (field === 'name' && String(id) === String(state.entryCompanyId)) applyEntryCompany(c);
+    drawTxRows(); // 표의 상호명도 갱신
+  } catch (err) {
+    c[field] = prev;
+    inp.value = prev;
+    alert(err.message);
+  }
 }
 
 function ssPick(i) {
@@ -1396,7 +1484,9 @@ function renderOnboarding() {
     }
     toast('업체 정보를 저장했습니다. 이제 거래를 입력해 보세요!');
     $('#tabs').classList.remove('hidden');
-    render();
+    state.tab = 'transactions';
+    $$('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === 'transactions'));
+    render(); // 거래관리로 이동하며 사용법 안내가 이어서 시작된다
   });
   $('#btnSkipOnboard').addEventListener('click', () => {
     try {
@@ -1423,6 +1513,186 @@ function renderBlocked(st) {
   const btn = $('#btnRecheck');
   if (btn) btn.addEventListener('click', () => location.reload());
 }
+
+/* ─────────────── 사용법 안내 (스포트라이트 튜토리얼) ─────────────── */
+const TOUR_STEPS = [
+  {
+    sel: '.ledger-table thead',
+    title: '여기가 장부입니다',
+    body: '거래 내역이 옛날→최신 순으로 쌓입니다. 머리글은 항상 위에 고정되어 있어 아래로 내려도 어떤 칸인지 보입니다.',
+    pos: 'bottom',
+  },
+  {
+    sel: '.entry-row',
+    title: '맨 아래 파란 줄에 바로 적으세요',
+    body: '날짜·상호·품명·수량·단가를 적고 Enter를 누르면 즉시 저장되고, 다음 줄을 이어서 적을 수 있습니다. 공급가액·세액·합계는 자동으로 계산됩니다.',
+    pos: 'top',
+  },
+  {
+    sel: '#eCompany',
+    title: '상호는 그냥 적으면 등록됩니다',
+    body: '클릭하면 등록된 상호 목록이 뜨고, 몇 글자만 쳐도 찾아줍니다. 처음 보는 상호명을 적으면 자동으로 새로 등록되니 미리 만들어 둘 필요가 없습니다. 한 번 정하면 계속 유지됩니다.',
+    pos: 'top',
+  },
+  {
+    sel: '#eName',
+    title: '품명도 자동으로 쌓입니다',
+    body: '몇 글자 치면 그 상호에서 팔던 제품이 힌트로 뜹니다. 골라 쓰면 규격·단가가 자동으로 채워집니다. 새 품명은 적는 순간 제품으로 등록되고, 단가를 바꿔 적으면 최신 단가로 갱신됩니다.',
+    pos: 'top',
+  },
+  {
+    sel: '#ePrice',
+    title: '반품·차감은 = 키로',
+    body: '단가를 적고 = 키를 누르면 마이너스로 바뀝니다(한 번 더 누르면 원래대로). 마이너스 금액은 표에서 빨간색으로 보입니다.',
+    pos: 'top',
+  },
+  {
+    sel: '#txRows tr[data-id]',
+    title: '행을 눌러 체크하고 소계 보기',
+    body: '행 아무 곳이나 누르면 체크됩니다. 체크한 뒤 = 키를 누르면 다음 줄이 연달아 체크되고, − 는 건너뛰기, Backspace 는 되돌리기입니다. 체크한 것들의 합계가 위에 표시됩니다.',
+    pos: 'bottom',
+    optional: true,
+  },
+  {
+    sel: '#fFrom',
+    title: '기간·상호·품명으로 찾기',
+    body: '날짜 범위, 상호, 품명으로 걸러 볼 수 있습니다. 걸러낸 결과의 합계도 함께 계산되며, [초기화]로 조건을 한 번에 지웁니다.',
+    pos: 'bottom',
+  },
+  {
+    sel: '#btnQuickSearch',
+    title: 'ESC 로 빠른 검색',
+    body: '언제든 ESC(또는 이 버튼)를 누르면 아래에서 검색창이 올라옵니다. 상호·제품을 찾아 고르면 입력 줄에 바로 채워집니다.',
+    pos: 'left',
+  },
+  {
+    sel: '#txRows tr[data-id] button[data-act="sheet"]',
+    title: '거래명세표 인쇄',
+    body: '[명세표] 버튼으로 거래명세표를 띄워 인쇄하거나 PDF로 저장합니다. 공급받는자 정보는 명세표에서 바로 고칠 수 있고, 공급자 정보는 [내 정보] 탭에서 설정합니다.',
+    pos: 'bottom',
+    optional: true,
+  },
+  {
+    sel: '#btnHelp',
+    title: '다시 보고 싶을 땐 여기',
+    body: '이 [?] 버튼을 누르면 언제든 사용법을 다시 볼 수 있습니다. 이제 첫 거래를 적어 보세요!',
+    pos: 'left',
+  },
+];
+
+const tour = { steps: [], i: 0 };
+
+function tourVisible(sel) {
+  const el = $(sel);
+  if (!el) return null;
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.height > 0 ? el : null;
+}
+
+function startTour() {
+  if (state.tab !== 'transactions') {
+    const btn = $('#tabs button[data-tab="transactions"]');
+    if (btn) btn.click();
+    setTimeout(startTour, 350); // 탭이 그려진 뒤 시작
+    return;
+  }
+  // 화면에 실제로 있는 단계만 사용 (거래가 없으면 행 관련 단계는 건너뜀)
+  tour.steps = TOUR_STEPS.filter((s) => !s.optional || tourVisible(s.sel));
+  tour.i = 0;
+  $('#tourOverlay').classList.remove('hidden');
+  showTourStep();
+}
+
+function endTour() {
+  $('#tourOverlay').classList.add('hidden');
+  try {
+    localStorage.setItem('tourDone', '1');
+  } catch (e) { /* 무시 */ }
+}
+
+function showTourStep() {
+  const step = tour.steps[tour.i];
+  if (!step) return endTour();
+  const el = tourVisible(step.sel);
+  if (!el) { // 못 찾으면 다음 단계로
+    tour.i += 1;
+    return showTourStep();
+  }
+  el.scrollIntoView({ block: 'center', behavior: 'instant' });
+
+  const r = el.getBoundingClientRect();
+  const pad = 6;
+  const spot = $('#tourSpot');
+  spot.style.top = r.top - pad + 'px';
+  spot.style.left = r.left - pad + 'px';
+  spot.style.width = r.width + pad * 2 + 'px';
+  spot.style.height = r.height + pad * 2 + 'px';
+
+  $('#tourStep').textContent = `${tour.i + 1} / ${tour.steps.length}`;
+  $('#tourTitle').textContent = step.title;
+  $('#tourBody').textContent = step.body;
+  $('#tourPrev').classList.toggle('hidden', tour.i === 0);
+  $('#tourNext').textContent = tour.i === tour.steps.length - 1 ? '시작하기' : '다음';
+
+  // 말풍선을 강조 영역 옆에 놓되 화면 밖으로 나가지 않게 한다
+  const box = $('#tourBox');
+  box.style.visibility = 'hidden';
+  box.style.top = '0px';
+  box.style.left = '0px';
+  requestAnimationFrame(() => {
+    const b = box.getBoundingClientRect();
+    const gap = 14;
+    let top;
+    let left;
+    if (step.pos === 'top') top = r.top - b.height - gap;
+    else if (step.pos === 'left' || step.pos === 'right') top = r.top + r.height / 2 - b.height / 2;
+    else top = r.bottom + gap;
+    if (step.pos === 'left') left = r.left - b.width - gap;
+    else if (step.pos === 'right') left = r.right + gap;
+    else left = r.left + r.width / 2 - b.width / 2;
+
+    // 넘치면 반대편으로 뒤집고, 그래도 넘치면 화면 안으로 밀어 넣는다
+    if (top < 8) top = r.bottom + gap;
+    if (top + b.height > window.innerHeight - 8) top = Math.max(8, r.top - b.height - gap);
+    left = Math.min(Math.max(8, left), window.innerWidth - b.width - 8);
+    top = Math.min(Math.max(8, top), window.innerHeight - b.height - 8);
+
+    box.style.top = top + 'px';
+    box.style.left = left + 'px';
+    box.style.visibility = 'visible';
+  });
+}
+
+$('#tourNext').addEventListener('click', () => {
+  tour.i += 1;
+  if (tour.i >= tour.steps.length) endTour();
+  else showTourStep();
+});
+$('#tourPrev').addEventListener('click', () => {
+  tour.i = Math.max(0, tour.i - 1);
+  showTourStep();
+});
+$('#tourSkip').addEventListener('click', endTour);
+$('#tourOverlay').addEventListener('click', (e) => {
+  if (e.target.id === 'tourOverlay') endTour(); // 배경 클릭으로 종료
+});
+document.addEventListener('keydown', (e) => {
+  if ($('#tourOverlay').classList.contains('hidden')) return;
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    e.stopPropagation();
+    endTour();
+  } else if (e.key === 'ArrowRight' || e.key === 'Enter') {
+    e.preventDefault();
+    $('#tourNext').click();
+  } else if (e.key === 'ArrowLeft') {
+    e.preventDefault();
+    $('#tourPrev').click();
+  }
+}, true);
+window.addEventListener('resize', () => {
+  if (!$('#tourOverlay').classList.contains('hidden')) showTourStep();
+});
 
 /* ─────────────── 시작 ─────────────── */
 $('#btnLogout').addEventListener('click', async () => {
