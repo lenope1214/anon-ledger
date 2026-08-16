@@ -402,6 +402,106 @@ body.sheet-open .fab-help { display: none; }
   box-shadow: 0 6px 18px rgba(15, 23, 42, 0.25);
 }
 
+/* ─────────────── 큰 글씨 간편 입력 ─────────────── */
+body.easy #main { max-width: 620px; }
+body.easy #topbar h1 { font-size: 1.3rem; }
+body.easy #tabs button { font-size: 1.05rem; padding: 0.65rem 0.8rem; }
+body.easy #whoami { font-size: 1rem; }
+body.easy #btnLogout { font-size: 0.95rem; padding: 0.45rem 0.9rem; }
+/* 탭이 넘칠 때 잘리지 않도록 좌우 여백 확보 */
+body.easy #tabs { padding-bottom: 0.15rem; }
+
+.easy-card { margin-bottom: 1rem; padding: 1.1rem; }
+.easy-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 0.9rem; }
+.easy-head h2, .easy-recent-title { font-size: 1.4rem; }
+#btnEasyOff { font-size: 1rem; padding: 0.55rem 0.9rem; }
+
+.easy-guide {
+  font-size: 1.02rem;
+  color: var(--sub);
+  background: #f8fafc;
+  border-radius: 10px;
+  padding: 0.7rem 0.8rem;
+  margin-bottom: 1.1rem;
+  line-height: 1.5;
+}
+
+.easy-field { margin-bottom: 1.1rem; }
+.easy-label {
+  display: block;
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 0.4rem;
+}
+.easy-field input, .easy-field select {
+  font-size: 1.35rem;
+  padding: 0.75rem 0.8rem;
+  border-width: 2px;
+  border-radius: 10px;
+}
+.easy-field input:focus, .easy-field select:focus { outline-width: 3px; }
+
+.stepper { display: flex; gap: 0.5rem; align-items: stretch; }
+.stepper input { text-align: center; }
+.step-btn {
+  flex: 0 0 4rem;
+  font-size: 1.8rem;
+  font-weight: 700;
+  border-width: 2px;
+  border-radius: 10px;
+  line-height: 1;
+  padding: 0.3rem;
+}
+.step-btn:active { background: #e2e8f0; }
+
+.sign-btn {
+  width: 100%;
+  margin-top: 0.5rem;
+  font-size: 1.05rem;
+  padding: 0.6rem;
+  border-width: 2px;
+  border-radius: 10px;
+}
+
+.easy-total {
+  font-size: 1.3rem;
+  text-align: center;
+  background: #eff6ff;
+  border-radius: 10px;
+  padding: 0.8rem;
+  margin: 0.4rem 0 1rem;
+}
+.easy-total b { font-size: 1.9rem; color: var(--accent-dark); }
+.easy-total b.neg { color: var(--danger); }
+
+.easy-save {
+  width: 100%;
+  font-size: 1.5rem;
+  font-weight: 800;
+  padding: 1rem;
+  border-radius: 12px;
+}
+
+.easy-item {
+  border: 2px solid var(--line);
+  border-radius: 12px;
+  padding: 0.8rem 0.9rem;
+  margin-bottom: 0.7rem;
+}
+.easy-item-head { display: flex; justify-content: space-between; align-items: baseline; font-size: 1.2rem; }
+.easy-item-head span { font-size: 0.95rem; color: var(--sub); }
+.easy-item-name { font-size: 1.1rem; margin: 0.35rem 0 0.5rem; }
+.easy-item-foot { display: flex; align-items: center; gap: 0.5rem; }
+.easy-item-foot b { font-size: 1.35rem; margin-right: auto; }
+.easy-item-foot button { font-size: 1rem; padding: 0.5rem 0.8rem; border-width: 2px; border-radius: 9px; }
+
+/* 큰 글씨 모드에서는 자동완성 힌트도 크게 */
+body.easy .ac-box { min-width: 16rem; }
+body.easy .ac-item { padding: 0.8rem 0.9rem; font-size: 1.15rem; }
+body.easy .ver-footer { font-size: 0.85rem; }
+body.easy .fab, body.easy .fab-help { display: none; }
+
 /* ─────────────── 사용법 안내 (스포트라이트) ─────────────── */
 #tourOverlay { position: fixed; inset: 0; z-index: 200; }
 
