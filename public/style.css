@@ -92,6 +92,7 @@ body {
 .hint { color: var(--sub); font-size: 0.85rem; margin-bottom: 0.75rem; }
 .sub { color: var(--sub); font-size: 0.8rem; }
 .warn { color: var(--warn); font-weight: 700; }
+.neg { color: var(--danger); }
 
 .empty-notice { text-align: center; padding: 2rem 1rem; color: var(--sub); }
 .empty-notice button { margin-top: 0.75rem; }

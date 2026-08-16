@@ -478,8 +478,8 @@ async function renderTransactions() {
               <td><input id="eCompany" placeholder="상호 검색" autocomplete="off"></td>
               <td><input id="eName" placeholder="품명 입력" autocomplete="off"></td>
               <td><input id="eSpec" placeholder="규격"></td>
-              <td><input id="eQty" type="number" inputmode="decimal" step="any" min="0" value="1"></td>
-              <td><input id="ePrice" type="number" inputmode="numeric" min="0" placeholder="단가"></td>
+              <td><input id="eQty" type="number" inputmode="decimal" step="any" value="1"></td>
+              <td><input id="ePrice" type="number" inputmode="numeric" placeholder="단가"></td>
               <td class="num" id="eSupply">0</td>
               <td class="num" id="eTax">0</td>
               <td class="num" id="eTotal">0</td>
@@ -491,7 +491,8 @@ async function renderTransactions() {
         </table>
       </div>
       <p class="hint">맨 아래 파란 행에 적고 Enter(또는 저장)를 누르면 바로 기록됩니다.
-      품명을 입력하면 등록된 제품이 힌트로 나타나며, 적은 품명·규격·단가는 제품관리에 자동 등록됩니다.</p>
+      품명을 입력하면 등록된 제품이 힌트로 나타나며, 적은 품명·규격·단가는 제품관리에 자동 등록됩니다.
+      <b>=</b> 키를 누르면 단가·합계의 부호가 + ⇄ − 로 바뀝니다 (반품·차감 입력).</p>
     </section>`;
 
   const eCompany = $('#eCompany');
@@ -551,9 +552,19 @@ async function renderTransactions() {
   });
   $('#btnEntrySave').addEventListener('click', saveEntry);
   $('.entry-row').addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && e.target.tagName === 'INPUT') {
+    if (e.target.tagName !== 'INPUT') return;
+    if (e.key === 'Enter') {
       e.preventDefault();
       saveEntry();
+    } else if (e.key === '=') {
+      // '=' 키로 단가(합계) 부호 토글: 8000 ⇄ -8000 (반품·차감 입력용)
+      e.preventDefault();
+      const el = $('#ePrice');
+      const v = Number(el.value) || 0;
+      if (v !== 0) {
+        el.value = -v;
+        recomputeEntry();
+      }
     }
   });
   recomputeEntry();
@@ -567,6 +578,9 @@ function recomputeEntry() {
   $('#eSupply').textContent = won(r.supply);
   $('#eTax').textContent = won(r.tax);
   $('#eTotal').textContent = won(r.supply + r.tax);
+  $('#eSupply').classList.toggle('neg', r.supply < 0);
+  $('#eTax').classList.toggle('neg', r.tax < 0);
+  $('#eTotal').classList.toggle('neg', r.supply + r.tax < 0);
 }
 
 async function saveEntry() {
@@ -633,11 +647,11 @@ async function drawTxRows() {
         <td>${single ? esc(it.spec) : ''}</td>
         <td class="num">${single ? won(it.qty) : ''}</td>
         <td class="num">${single ? won(it.price) : ''}</td>
-        <td class="num">${won(t.supplyTotal)}</td>
-        <td class="num">${won(t.taxTotal)}</td>
-        <td class="num"><b>${won(t.total)}</b></td>
+        <td class="num ${t.supplyTotal < 0 ? 'neg' : ''}">${won(t.supplyTotal)}</td>
+        <td class="num ${t.taxTotal < 0 ? 'neg' : ''}">${won(t.taxTotal)}</td>
+        <td class="num ${t.total < 0 ? 'neg' : ''}"><b>${won(t.total)}</b></td>
         <td class="num">${won(t.paid)}</td>
-        <td class="num ${balance > 0 ? 'warn' : ''}">${won(balance)}</td>
+        <td class="num ${balance > 0 ? 'warn' : balance < 0 ? 'neg' : ''}">${won(balance)}</td>
         <td class="actions">
           <button data-act="sheet" data-id="${t.id}">명세표</button>
           <button data-act="edit" data-id="${t.id}">수정</button>
@@ -716,8 +730,8 @@ async function openTxForm(tx) {
     tr.innerHTML = `
       <td><input class="i-name" value="${esc(item && item.name)}" placeholder="품명" autocomplete="off"></td>
       <td><input class="i-spec" value="${esc(item && item.spec)}" placeholder="규격"></td>
-      <td><input class="i-qty" type="number" inputmode="decimal" step="any" min="0" value="${item ? item.qty : 1}"></td>
-      <td><input class="i-price" type="number" inputmode="numeric" min="0" value="${item ? item.price : 0}"></td>
+      <td><input class="i-qty" type="number" inputmode="decimal" step="any" value="${item ? item.qty : 1}"></td>
+      <td><input class="i-price" type="number" inputmode="numeric" value="${item ? item.price : 0}"></td>
       <td class="num i-amount">0</td>
       <td><button type="button" class="i-del" title="품목 삭제">✕</button></td>`;
     attachProductAutocomplete($('.i-name', tr), () => form.companyId.value, (p) => {
@@ -725,6 +739,17 @@ async function openTxForm(tx) {
       $('.i-spec', tr).value = p.spec;
       $('.i-price', tr).value = p.price;
       recompute();
+    });
+    tr.addEventListener('keydown', (e) => {
+      if (e.key === '=' && e.target.tagName === 'INPUT') {
+        e.preventDefault();
+        const el = $('.i-price', tr);
+        const v = Number(el.value) || 0;
+        if (v !== 0) {
+          el.value = -v;
+          recompute();
+        }
+      }
     });
     $('#itemRows').appendChild(tr);
     recompute();
