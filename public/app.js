@@ -851,15 +851,17 @@ function searchSheetOpen() {
 
 function openSearchSheet() {
   $('#searchSheet').classList.remove('hidden');
-  $('#sheetBackdrop').classList.remove('hidden');
+  document.body.classList.add('sheet-open'); // 본문을 패널 높이만큼 위로 밀어 올림
   $('#ssInput').value = '';
   ssUpdate();
   $('#ssInput').focus();
+  scrollSheetToBottom(); // 입력 행이 패널 위에 계속 보이도록
 }
 
 function closeSearchSheet() {
   $('#searchSheet').classList.add('hidden');
-  $('#sheetBackdrop').classList.add('hidden');
+  document.body.classList.remove('sheet-open');
+  scrollSheetToBottom();
 }
 
 function toggleSearchSheet() {
@@ -958,7 +960,6 @@ function ssPick(i) {
 $('#ssTabCompany').addEventListener('click', () => ssSetTab('company'));
 $('#ssTabProduct').addEventListener('click', () => ssSetTab('product'));
 $('#ssClose').addEventListener('click', closeSearchSheet);
-$('#sheetBackdrop').addEventListener('click', closeSearchSheet);
 let ssTimer = null;
 $('#ssInput').addEventListener('input', () => {
   clearTimeout(ssTimer);
