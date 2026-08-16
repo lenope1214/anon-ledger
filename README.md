@@ -70,7 +70,7 @@ PC를 켜 두지 않아도 어디서든 접속되는 방법입니다. 무료 요
 
 1. [vercel.com](https://vercel.com)에 GitHub 계정으로 가입 → **Add New → Project** →
    이 저장소(`anon-ledger`)를 Import (설정은 기본값 그대로 Deploy)
-2. 프로젝트 **Settings → Git → Production Branch**를 `production`으로 변경
+2. 프로젝트 **Settings → Environments → Production**의 **Branch Tracking**을 `production`으로 변경
 3. **Storage 탭 → Create Database → Neon (Postgres)** 생성·연결
    (환경변수 `DATABASE_URL`이 자동 등록됩니다)
 4. **Deployments → 최신 항목 → Redeploy** (DB 연결을 반영하기 위해 한 번 재배포)
