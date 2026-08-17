@@ -902,6 +902,55 @@ async function drawEasyList() {
   };
 }
 
+/* ─────────────── 입력 중 저장 막대 (휴대폰 키보드 위) ─────────────── */
+// 아이폰 숫자 키패드에는 Enter 키가 없어 저장 버튼까지 가로 스크롤해야 했다.
+// 입력칸에 커서가 있는 동안 키보드 바로 위에 저장 버튼을 띄운다.
+const SAVE_BAR_FIELDS = /^(eDate|eCompany|eName|eSpec|eQty|ePrice|ePaid|xDate|xCompany|xName|xQty|xPrice|xPaid)$/;
+
+function saveBarTarget() {
+  const el = document.activeElement;
+  return el && el.id && SAVE_BAR_FIELDS.test(el.id) ? el : null;
+}
+
+function updateSaveBar() {
+  const bar = $('#saveBar');
+  if (!bar) return;
+  if (state.tab !== 'transactions' || !saveBarTarget()) {
+    bar.classList.add('hidden');
+    return;
+  }
+  bar.classList.remove('hidden');
+  // 키보드가 화면을 가리는 만큼 위로 올린다 (지원하지 않는 브라우저는 화면 하단)
+  const vv = window.visualViewport;
+  const gap = vv ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
+  bar.style.bottom = gap + 'px';
+
+  const isEasy = state.easyMode;
+  const qty = Number($(isEasy ? '#xQty' : '#eQty')?.value) || 0;
+  const price = Number($(isEasy ? '#xPrice' : '#ePrice')?.value) || 0;
+  const r = calcItem(qty, price, state.entryVat);
+  const total = r.supply + r.tax;
+  const name = ($(isEasy ? '#xName' : '#eName')?.value || '').trim();
+  const info = $('#saveBarInfo');
+  info.textContent = (name || '이전 품목') + ' · ' + won(total) + '원';
+  info.classList.toggle('neg', total < 0);
+}
+
+document.addEventListener('focusin', updateSaveBar);
+document.addEventListener('focusout', () => setTimeout(updateSaveBar, 80));
+document.addEventListener('input', (e) => {
+  if (saveBarTarget()) updateSaveBar();
+});
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', updateSaveBar);
+  window.visualViewport.addEventListener('scroll', updateSaveBar);
+}
+$('#saveBar').addEventListener('mousedown', (e) => e.preventDefault()); // 커서를 잃지 않게
+$('#saveBarBtn').addEventListener('click', () => {
+  if (state.easyMode) saveEasyEntry();
+  else saveEntry();
+});
+
 /* ─────────────── 커서 고정 ─────────────── */
 // 저장 후 커서가 돌아갈 칸을 지정한다 (지정 전 기본값은 품명).
 // PC: F2, 휴대폰: 📌 버튼. 기기에 기억되어 다음 접속에도 유지된다.
