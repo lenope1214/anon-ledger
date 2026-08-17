@@ -1215,6 +1215,27 @@ function updateSelSummary() {
   el.textContent = ` · ☑ 선택 ${sel.length}건: 합계 ${won(total)}원 · 입금 ${won(paid)}원 · 잔액 ${won(total - paid)}원`;
 }
 
+// 고정된 머리글·입력 행에 가려지지 않게 스크롤한다 (다음 줄까지 한 줄 더 보이도록)
+function scrollRowIntoView(tr) {
+  const wrap = $('.ledger-wrap');
+  if (!wrap || !tr) return;
+  const head = $('.ledger-table thead', wrap);
+  const entry = $('.entry-row', wrap);
+  const headH = head ? head.getBoundingClientRect().height : 0;
+  const entryH = entry ? entry.getBoundingClientRect().height : 0;
+  const wrapRect = wrap.getBoundingClientRect();
+  const rowRect = tr.getBoundingClientRect();
+  const lookahead = rowRect.height; // 다음에 체크될 줄도 미리 보이게
+  const topLimit = wrapRect.top + headH;
+  const bottomLimit = wrapRect.bottom - entryH;
+
+  if (rowRect.bottom + lookahead > bottomLimit) {
+    wrap.scrollTop += rowRect.bottom + lookahead - bottomLimit;
+  } else if (rowRect.top < topLimit) {
+    wrap.scrollTop -= topLimit - rowRect.top;
+  }
+}
+
 // 포인터(현재 위치) 행 표시 — 어느 행에서 이어갈지 파란 테두리로 보여준다
 function updatePointerHighlight() {
   const rows = $$('#txRows tr[data-id]');
@@ -1229,7 +1250,10 @@ function checkNextRow() {
   if (sheetLastIdx == null) return;
   const rows = $$('#txRows tr[data-id]');
   const next = rows[sheetLastIdx + 1];
-  if (!next) return;
+  if (!next) {
+    toast('마지막 줄입니다.');
+    return;
+  }
   sheetLastIdx += 1;
   const cb = next.querySelector('input[type="checkbox"]');
   if (cb && !cb.checked) {
@@ -1237,7 +1261,7 @@ function checkNextRow() {
     checkedTxIds.add(Number(next.dataset.id));
     next.classList.add('row-checked');
   }
-  next.scrollIntoView({ block: 'nearest' });
+  scrollRowIntoView(next);
   updatePointerHighlight();
   updateSelSummary();
 }
@@ -1247,9 +1271,12 @@ function skipNextRow() {
   if (sheetLastIdx == null) return;
   const rows = $$('#txRows tr[data-id]');
   const next = rows[sheetLastIdx + 1];
-  if (!next) return;
+  if (!next) {
+    toast('마지막 줄입니다.');
+    return;
+  }
   sheetLastIdx += 1;
-  next.scrollIntoView({ block: 'nearest' });
+  scrollRowIntoView(next);
   updatePointerHighlight();
 }
 
@@ -1266,7 +1293,7 @@ function undoCheckRow() {
     cur.classList.remove('row-checked');
   }
   sheetLastIdx -= 1; // -1이 되면 '첫 행 이전' 상태 — 다음 '='는 첫 행부터 체크
-  if (sheetLastIdx >= 0) rows[sheetLastIdx].scrollIntoView({ block: 'nearest' });
+  if (sheetLastIdx >= 0) scrollRowIntoView(rows[sheetLastIdx]);
   updatePointerHighlight();
   updateSelSummary();
 }
