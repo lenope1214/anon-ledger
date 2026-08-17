@@ -20,9 +20,11 @@ const state = {
   txTo: '',             // 거래 필터: 종료일
   txProductQuery: '',   // 거래 필터: 품명 검색어
 };
+state.easyMode = false; // 큰 글씨 간편 입력 (휴대폰·어르신용)
 try {
   const savedVat = localStorage.getItem('entryVat');
   if (savedVat && ['separate', 'included', 'none'].includes(savedVat)) state.entryVat = savedVat;
+  state.easyMode = localStorage.getItem('easyMode') === '1';
 } catch (e) { /* localStorage 사용 불가 환경 */ }
 
 const VAT_LABEL = { separate: '부가세 별도', included: '부가세 포함', none: '부가세 없음' };
@@ -453,7 +455,18 @@ let txCache = [];
 let checkedTxIds = new Set(); // 체크된 거래 id (새로고침 전까지 유지)
 let sheetLastIdx = null;      // 마지막으로 체크한 행 위치 ('=' 연속 체크용)
 
+function setEasyMode(on) {
+  state.easyMode = on;
+  try {
+    localStorage.setItem('easyMode', on ? '1' : '0');
+  } catch (e) { /* 무시 */ }
+  document.body.classList.toggle('easy', on);
+  renderTransactions();
+}
+
 async function renderTransactions() {
+  document.body.classList.toggle('easy', state.easyMode);
+  if (state.easyMode) return renderTransactionsEasy();
   await refreshCompanies();
   const main = $('#main');
   main.innerHTML = `
@@ -472,6 +485,8 @@ async function renderTransactions() {
           ${Object.entries(VAT_LABEL).map(([v, l]) => `<option value="${v}" ${v === state.entryVat ? 'selected' : ''}>${l}</option>`).join('')}
         </select>
         <button id="btnAddTx">＋ 여러 품목 거래</button>
+        <button id="btnEasyOn" title="글씨를 크게 해서 하나씩 입력합니다">🔎 큰 글씨</button>
+        <button type="button" id="btnPin" class="pin-btn">📌<span id="pinLabel" class="pin-label">커서 고정</span></button>
       </div>
       <p class="summary"><span id="txSummary"></span><span id="selSummary" class="sel-summary"></span></p>
       <div class="table-wrap ledger-wrap">
@@ -483,7 +498,7 @@ async function renderTransactions() {
               <td class="chk"></td>
               <td><input type="date" id="eDate" value="${esc(state.entryDate || today())}"></td>
               <td><input id="eCompany" placeholder="상호 입력·검색" autocomplete="off"></td>
-              <td><input id="eName" placeholder="품명 입력" autocomplete="off"></td>
+              <td><input id="eName" placeholder="품명 (비우면 이전 품목)" autocomplete="off"></td>
               <td><input id="eSpec" placeholder="규격"></td>
               <td><input id="eQty" type="number" inputmode="decimal" step="any" value="1"></td>
               <td><input id="ePrice" type="number" inputmode="numeric" placeholder="단가"></td>
@@ -499,10 +514,12 @@ async function renderTransactions() {
       </div>
       <p class="hint sheet-hint">
         <span><b>Enter</b> 저장</span>
+        <span><b>품명 비우고 Enter</b> 이전 품목 그대로</span>
         <span><b>=</b> 부호 토글 · 연속 체크</span>
         <span><b>−</b> 건너뛰기</span>
         <span><b>Backspace</b> 되돌리기</span>
         <span><b>ESC</b> 빠른 검색</span>
+        <span><b>F2</b> 커서 고정</span>
         <button type="button" id="btnHelpInline" class="link-btn">자세한 사용법 보기</button>
       </p>
       <button type="button" class="fab" id="btnQuickSearch" title="빠른 검색 (ESC)">🔍 검색</button>
@@ -574,8 +591,21 @@ async function renderTransactions() {
     recomputeEntry();
   });
   $('#btnAddTx').addEventListener('click', () => openTxForm(null));
-  $('#eQty').addEventListener('input', recomputeEntry);
+  $('#btnEasyOn').addEventListener('click', () => setEasyMode(true));
+  $('#eQty').addEventListener('input', () => {
+    state.entryQtyTouched = true;
+    recomputeEntry();
+  });
   $('#ePrice').addEventListener('input', recomputeEntry);
+  // 품명을 비운 채 다음 칸으로 넘어가면 이전 품목을 그대로 채워 준다
+  $('#eName').addEventListener('blur', () => {
+    setTimeout(() => {
+      if ($('#eName') && !$('#eName').value.trim() && fillFromLastItem($('#eName'), $('#eSpec'), $('#ePrice'), $('#eQty'))) {
+        recomputeEntry();
+        toast('이전 품목을 불러왔습니다.');
+      }
+    }, 180); // 자동완성 힌트를 고르는 중이면 건너뛰도록 잠깐 기다린다
+  });
   attachProductAutocomplete($('#eName'), () => state.entryCompanyId, (p) => {
     $('#eName').value = p.name;
     $('#eSpec').value = p.spec;
@@ -588,6 +618,9 @@ async function renderTransactions() {
   $('#btnHelp').addEventListener('click', startTour);
   $('#btnHelpInline').addEventListener('click', startTour);
   $('#btnEntrySave').addEventListener('click', saveEntry);
+  // 버튼을 누르면 포커스가 옮겨가므로 직전에 커서가 있던 칸을 기준으로 고정한다
+  $('#btnPin').addEventListener('mousedown', (e) => e.preventDefault());
+  $('#btnPin').addEventListener('click', () => togglePin(document.activeElement));
   $('.entry-row').addEventListener('keydown', (e) => {
     if (e.target.tagName !== 'INPUT') return;
     if (e.key === 'Enter') {
@@ -605,6 +638,7 @@ async function renderTransactions() {
     }
   });
   recomputeEntry();
+  updatePinUI();
   await drawTxRows();
   scrollSheetToBottom();
   maybeAutoTour(); // 처음 온 사용자에게 사용법 안내
@@ -612,6 +646,7 @@ async function renderTransactions() {
 
 // 첫 방문(또는 안내를 끝까지 본 적 없는 경우)에 한 번만 자동으로 튜토리얼을 띄운다
 function maybeAutoTour() {
+  if (state.easyMode) return; // 큰 글씨 모드에는 안내 대상 요소가 없다
   let done = true;
   try {
     done = localStorage.getItem('tourDone') === '1';
@@ -620,6 +655,341 @@ function maybeAutoTour() {
   setTimeout(() => {
     if ($('.entry-row') && $('#tourOverlay').classList.contains('hidden')) startTour();
   }, 500);
+}
+
+/* ─────────────── 큰 글씨 간편 입력 ─────────────── */
+async function renderTransactionsEasy() {
+  await refreshCompanies();
+  $('#main').innerHTML = `
+    <section class="card easy-card">
+      <div class="easy-head">
+        <h2>거래 적기</h2>
+        <button type="button" id="btnEasyOff">일반 화면</button>
+      </div>
+      <p class="easy-guide">아래 칸을 위에서부터 하나씩 채우고 맨 아래 <b>[저장하기]</b>를 누르세요.<br>
+      같은 걸 또 적을 땐 품명을 <b>비워두고</b> 저장하면 직전 품목이 그대로 들어갑니다.</p>
+      <form id="easyForm" autocomplete="off">
+        <div class="easy-field">
+          <span class="easy-label">날짜</span>
+          <input type="date" id="xDate" value="${esc(state.entryDate || today())}">
+        </div>
+        <div class="easy-field">
+          <span class="easy-label">상호 (거래처)</span>
+          <input id="xCompany" placeholder="눌러서 고르거나 새로 적기">
+        </div>
+        <div class="easy-field">
+          <span class="easy-label">품명</span>
+          <input id="xName" placeholder="예: 식대">
+          <button type="button" id="xSame" class="sign-btn">직전에 적은 것과 같게</button>
+        </div>
+        <div class="easy-field">
+          <span class="easy-label">수량</span>
+          <div class="stepper">
+            <button type="button" class="step-btn" data-step="-1">－</button>
+            <input id="xQty" type="number" inputmode="decimal" step="any" value="1">
+            <button type="button" class="step-btn" data-step="1">＋</button>
+          </div>
+        </div>
+        <div class="easy-field">
+          <span class="easy-label">단가 (금액)</span>
+          <input id="xPrice" type="number" inputmode="numeric" placeholder="0">
+          <button type="button" id="xSign" class="sign-btn">＋ ↔ － 바꾸기</button>
+        </div>
+        <div class="easy-field">
+          <span class="easy-label">부가세</span>
+          <select id="xVat">
+            ${Object.entries(VAT_LABEL).map(([v, l]) => `<option value="${v}" ${v === state.entryVat ? 'selected' : ''}>${l}</option>`).join('')}
+          </select>
+        </div>
+        <div class="easy-field">
+          <span class="easy-label">받은 돈 (없으면 비워두세요)</span>
+          <input id="xPaid" type="number" inputmode="numeric" placeholder="0">
+        </div>
+        <p class="easy-total">합계 <b id="xTotal">0원</b></p>
+        <button type="button" id="btnPin" class="pin-btn easy-pin">📌<span id="pinLabel" class="pin-label">커서 고정</span></button>
+        <button type="submit" class="primary easy-save">저장하기</button>
+      </form>
+    </section>
+    <section class="card easy-card">
+      <h2 class="easy-recent-title">최근에 적은 거래</h2>
+      <div id="easyList"></div>
+    </section>`;
+
+  const xCompany = $('#xCompany');
+  const preferred = state.companies.find((c) => String(c.id) === String(state.entryCompanyId));
+  if (preferred) xCompany.value = preferred.name;
+
+  attachSearchDropdown(xCompany, {
+    minChars: 0,
+    enterPicksFirst: true,
+    getItems: async (q) => state.companies.filter((c) => !q || c.name.toLowerCase().includes(q)),
+    itemHtml: (c) => `<b>${esc(c.name)}</b>${c.owner ? `<span class="sub">${esc(c.owner)}</span>` : ''}`,
+    onPick: (c) => {
+      state.entryCompanyId = String(c.id);
+      xCompany.value = c.name;
+      $('#xName').focus();
+    },
+  });
+  xCompany.addEventListener('input', () => {
+    state.entryCompanyId = ''; // 이름을 고치면 새 상호로 취급 (없으면 자동 등록)
+  });
+  attachProductAutocomplete($('#xName'), () => state.entryCompanyId, (p) => {
+    $('#xName').value = p.name;
+    $('#xPrice').value = p.price;
+    easyRecompute();
+  });
+
+  $('#xSame').addEventListener('click', () => {
+    if (fillFromLastItem($('#xName'), null, $('#xPrice'), $('#xQty'))) {
+      easyRecompute();
+      toast('직전 품목을 불러왔습니다.');
+    } else {
+      toast('아직 적은 거래가 없습니다.');
+    }
+  });
+  $('#xName').addEventListener('blur', () => {
+    setTimeout(() => {
+      if ($('#xName') && !$('#xName').value.trim() && fillFromLastItem($('#xName'), null, $('#xPrice'), $('#xQty'))) {
+        easyRecompute();
+        toast('이전 품목을 불러왔습니다.');
+      }
+    }, 180);
+  });
+
+  $$('.step-btn').forEach((btn) =>
+    btn.addEventListener('click', () => {
+      const el = $('#xQty');
+      const next = (Number(el.value) || 0) + Number(btn.dataset.step);
+      el.value = next < 0 ? 0 : next;
+      state.entryQtyTouched = true;
+      easyRecompute();
+    })
+  );
+  $('#xSign').addEventListener('click', () => {
+    const el = $('#xPrice');
+    const v = Number(el.value) || 0;
+    if (v !== 0) {
+      el.value = -v;
+      easyRecompute();
+    }
+  });
+  $('#xQty').addEventListener('input', () => {
+    state.entryQtyTouched = true;
+    easyRecompute();
+  });
+  $('#xPrice').addEventListener('input', easyRecompute);
+  $('#xVat').addEventListener('change', (e) => {
+    state.entryVat = e.target.value;
+    try {
+      localStorage.setItem('entryVat', e.target.value);
+    } catch (err) { /* 무시 */ }
+    easyRecompute();
+  });
+  $('#btnEasyOff').addEventListener('click', () => setEasyMode(false));
+  $('#btnPin').addEventListener('mousedown', (e) => e.preventDefault());
+  $('#btnPin').addEventListener('click', () => togglePin(document.activeElement));
+  $('#easyForm').addEventListener('submit', (e) => {
+    e.preventDefault();
+    saveEasyEntry();
+  });
+
+  easyRecompute();
+  updatePinUI();
+  await drawEasyList();
+}
+
+function easyRecompute() {
+  if (!$('#xQty')) return;
+  const r = calcItem(Number($('#xQty').value) || 0, Number($('#xPrice').value) || 0, state.entryVat);
+  const total = r.supply + r.tax;
+  $('#xTotal').textContent = won(total) + '원';
+  $('#xTotal').classList.toggle('neg', total < 0);
+}
+
+async function saveEasyEntry() {
+  const companyName = $('#xCompany').value.trim();
+  if (!state.entryCompanyId && !companyName) {
+    alert('상호를 적어주세요.');
+    $('#xCompany').focus();
+    return;
+  }
+  let name = $('#xName').value.trim();
+  if (!name) {
+    // 품명이 비어 있으면 직전 품목을 그대로 적용한다
+    if (fillFromLastItem($('#xName'), null, $('#xPrice'), $('#xQty'))) {
+      easyRecompute();
+      name = $('#xName').value.trim();
+    }
+  }
+  if (!name) {
+    alert('품명을 적어주세요.');
+    $('#xName').focus();
+    return;
+  }
+  const body = {
+    companyId: Number(state.entryCompanyId) || 0,
+    companyName,
+    date: $('#xDate').value || today(),
+    vatMode: state.entryVat,
+    items: [{ name, spec: '', qty: Number($('#xQty').value) || 0, price: Number($('#xPrice').value) || 0 }],
+    paid: Number($('#xPaid').value) || 0,
+    memo: '',
+  };
+  let tx;
+  try {
+    tx = await api('POST', '/api/transactions', body);
+  } catch (err) {
+    alert(err.message);
+    return;
+  }
+  state.entryDate = body.date;
+  state.entryQtyTouched = false;
+  clearProductsCache();
+  await refreshCompanies();
+  const saved = state.companies.find((c) => c.id === tx.companyId);
+  if (saved) {
+    state.entryCompanyId = String(saved.id);
+    $('#xCompany').value = saved.name;
+  }
+  $('#xName').value = '';
+  $('#xQty').value = 1;
+  $('#xPrice').value = '';
+  $('#xPaid').value = '';
+  easyRecompute();
+  toast('저장했습니다.');
+  await drawEasyList();
+  updatePinUI();
+  focusAfterSave('xName');
+}
+
+async function drawEasyList() {
+  txCache = await api('GET', '/api/transactions');
+  const box = $('#easyList');
+  if (!box) return;
+  const rows = txCache.slice(0, 15); // 최신순 15건
+  if (!rows.length) {
+    box.innerHTML = '<p class="empty-cell">아직 적은 거래가 없습니다.</p>';
+    return;
+  }
+  box.innerHTML = rows
+    .map((t) => {
+      const it = t.items[0];
+      const more = t.items.length > 1 ? ` 외 ${t.items.length - 1}건` : '';
+      return `<div class="easy-item" data-id="${t.id}">
+        <div class="easy-item-head"><b>${esc(t.companyName)}</b><span>${esc(t.date)}</span></div>
+        <div class="easy-item-name">${esc(it.name)}${more}</div>
+        <div class="easy-item-foot">
+          <b class="${t.total < 0 ? 'neg' : ''}">${won(t.total)}원</b>
+          <button type="button" data-act="sheet">명세표</button>
+          <button type="button" data-act="del" class="danger">삭제</button>
+        </div>
+      </div>`;
+    })
+    .join('');
+  box.onclick = async (e) => {
+    const btn = e.target.closest('button[data-act]');
+    if (!btn) return;
+    const id = Number(btn.closest('.easy-item').dataset.id);
+    const t = txCache.find((x) => x.id === id);
+    if (!t) return;
+    if (btn.dataset.act === 'sheet') openStatement(t);
+    else if (btn.dataset.act === 'del') {
+      if (!confirm(`${t.date} '${t.companyName}' 거래를 지울까요?`)) return;
+      await api('DELETE', '/api/transactions/' + id);
+      toast('지웠습니다.');
+      drawEasyList();
+    }
+  };
+}
+
+/* ─────────────── 커서 고정 ─────────────── */
+// 저장 후 커서가 돌아갈 칸을 지정한다 (지정 전 기본값은 품명).
+// PC: F2, 휴대폰: 📌 버튼. 기기에 기억되어 다음 접속에도 유지된다.
+const PIN_FIELDS = {
+  eDate: '날짜', eCompany: '상호', eName: '품명', eSpec: '규격',
+  eQty: '수량', ePrice: '단가', ePaid: '입금',
+  xDate: '날짜', xCompany: '상호', xName: '품명', xQty: '수량',
+  xPrice: '단가', xPaid: '받은 돈',
+};
+
+state.pinnedField = '';
+try {
+  const saved = localStorage.getItem('pinnedField');
+  if (saved && PIN_FIELDS[saved]) state.pinnedField = saved;
+} catch (e) { /* localStorage 사용 불가 환경 */ }
+
+// 저장 후 커서를 보낼 칸 (고정된 칸이 지금 화면에 없으면 품명으로)
+function focusAfterSave(defaultId) {
+  const el = (state.pinnedField && $('#' + state.pinnedField)) || $('#' + defaultId);
+  if (!el) return;
+  el.focus();
+  if (el.select) el.select();
+}
+
+function pinLabel() {
+  return state.pinnedField ? PIN_FIELDS[state.pinnedField] : '';
+}
+
+// 지금 커서가 있는 칸을 고정한다 (같은 칸을 다시 지정하면 해제)
+function togglePin(el) {
+  const target = el && el.id && PIN_FIELDS[el.id] ? el : null;
+  if (!target) {
+    toast('먼저 고정할 입력칸을 누르세요.');
+    return;
+  }
+  state.pinnedField = state.pinnedField === target.id ? '' : target.id;
+  try {
+    localStorage.setItem('pinnedField', state.pinnedField);
+  } catch (e) { /* 무시 */ }
+  toast(state.pinnedField ? `📌 '${pinLabel()}' 칸에 커서를 고정했습니다.` : '📌 커서 고정을 해제했습니다.');
+  updatePinUI();
+}
+
+// 고정된 칸에 표시를 붙이고 버튼 문구를 갱신한다
+function updatePinUI() {
+  $$('.pinned').forEach((el) => el.classList.remove('pinned'));
+  if (state.pinnedField) {
+    const el = $('#' + state.pinnedField);
+    if (el) el.classList.add('pinned');
+  }
+  const btn = $('#btnPin');
+  if (btn) {
+    btn.classList.toggle('on', !!state.pinnedField);
+    btn.title = state.pinnedField
+      ? `저장 후 '${pinLabel()}' 칸으로 돌아갑니다 (F2로 해제)`
+      : '커서 고정: 입력칸을 누른 뒤 이 버튼(또는 F2)을 누르세요';
+    const label = $('#pinLabel');
+    if (label) label.textContent = state.pinnedField ? pinLabel() : '커서 고정';
+  }
+}
+
+// F2: 지금 커서가 있는 칸을 고정 / 해제
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'F2' || state.tab !== 'transactions') return;
+  e.preventDefault();
+  togglePin(document.activeElement);
+});
+
+/* ─────────────── 이전 품목 그대로 적기 ─────────────── */
+// 품명을 비운 채 넘어가거나 저장하면 직전에 적은 품목을 그대로 불러온다.
+// 선택된 상호의 마지막 거래를 우선 쓰고, 없으면 전체 마지막 거래를 쓴다.
+function getLastItem() {
+  const cid = Number(state.entryCompanyId) || 0;
+  const src = (cid && txCache.find((t) => t.companyId === cid)) || txCache[0];
+  if (!src || !src.items.length) return null;
+  const it = src.items[src.items.length - 1];
+  return { name: it.name, spec: it.spec || '', price: it.price, qty: it.qty };
+}
+
+// 수량은 사용자가 직접 건드리지 않았을 때만 이전 값을 따라간다
+function fillFromLastItem(nameEl, specEl, priceEl, qtyEl) {
+  const last = getLastItem();
+  if (!last) return false;
+  nameEl.value = last.name;
+  if (specEl) specEl.value = last.spec;
+  priceEl.value = last.price;
+  if (qtyEl && !state.entryQtyTouched) qtyEl.value = last.qty;
+  return true;
 }
 
 function scrollSheetToBottom() {
@@ -652,7 +1022,14 @@ async function saveEntry() {
     $('#eCompany').focus();
     return;
   }
-  const name = $('#eName').value.trim();
+  let name = $('#eName').value.trim();
+  if (!name) {
+    // 품명이 비어 있으면 직전 품목을 그대로 적용한다
+    if (fillFromLastItem($('#eName'), $('#eSpec'), $('#ePrice'), $('#eQty'))) {
+      recomputeEntry();
+      name = $('#eName').value.trim();
+    }
+  }
   if (!name) {
     toast('품명을 입력하세요.');
     $('#eName').focus();
@@ -675,6 +1052,7 @@ async function saveEntry() {
     return;
   }
   state.entryDate = body.date;
+  state.entryQtyTouched = false;
   clearProductsCache(); // 자동 등록된 제품이 힌트에 바로 나오도록
   await refreshCompanies(); // 자동 등록된 상호가 검색에 바로 나오도록
   const savedCompany = state.companies.find((c) => c.id === tx.companyId);
@@ -687,7 +1065,8 @@ async function saveEntry() {
   await drawTxRows();
   toast('저장했습니다.');
   scrollSheetToBottom();
-  $('#eName').focus();
+  updatePinUI();
+  focusAfterSave('eName');
 }
 
 async function drawTxRows() {
@@ -1537,7 +1916,7 @@ const TOUR_STEPS = [
   {
     sel: '#eName',
     title: '품명도 자동으로 쌓입니다',
-    body: '몇 글자 치면 그 상호에서 팔던 제품이 힌트로 뜹니다. 골라 쓰면 규격·단가가 자동으로 채워집니다. 새 품명은 적는 순간 제품으로 등록되고, 단가를 바꿔 적으면 최신 단가로 갱신됩니다.',
+    body: '몇 글자 치면 그 상호에서 팔던 제품이 힌트로 뜹니다. 골라 쓰면 규격·단가가 자동으로 채워집니다. 새 품명은 적는 순간 제품으로 등록되고, 단가를 바꿔 적으면 최신 단가로 갱신됩니다. 같은 걸 또 적을 땐 품명을 비운 채 Enter만 눌러도 직전 품목이 그대로 들어갑니다.',
     pos: 'top',
   },
   {
@@ -1573,6 +1952,12 @@ const TOUR_STEPS = [
     optional: true,
   },
   {
+    sel: '#btnPin',
+    title: '저장 후 커서 자리 정하기 (커서 고정)',
+    body: '저장하면 커서는 품명 칸으로 돌아갑니다. 다른 칸에서 이어 적고 싶으면, 그 칸을 누른 뒤 F2(또는 이 📌 버튼)를 누르세요. 저장할 때마다 고정한 칸으로 돌아갑니다. 한 번 더 누르면 해제됩니다.',
+    pos: 'top',
+  },
+  {
     sel: '#btnHelp',
     title: '다시 보고 싶을 땐 여기',
     body: '이 [?] 버튼을 누르면 언제든 사용법을 다시 볼 수 있습니다. 이제 첫 거래를 적어 보세요!',
@@ -1590,6 +1975,10 @@ function tourVisible(sel) {
 }
 
 function startTour() {
+  if (state.easyMode) {
+    alert('큰 글씨 모드에서는 화면 그대로 하나씩 적으면 됩니다.\n날짜 → 상호 → 품명 → 수량 → 단가를 채우고 [저장하기]를 누르세요.');
+    return;
+  }
   if (state.tab !== 'transactions') {
     const btn = $('#tabs button[data-tab="transactions"]');
     if (btn) btn.click();
