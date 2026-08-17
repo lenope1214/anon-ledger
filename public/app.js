@@ -902,6 +902,55 @@ async function drawEasyList() {
   };
 }
 
+/* ─────────────── 입력 중 저장 막대 (휴대폰 키보드 위) ─────────────── */
+// 아이폰 숫자 키패드에는 Enter 키가 없어 저장 버튼까지 가로 스크롤해야 했다.
+// 입력칸에 커서가 있는 동안 키보드 바로 위에 저장 버튼을 띄운다.
+const SAVE_BAR_FIELDS = /^(eDate|eCompany|eName|eSpec|eQty|ePrice|ePaid|xDate|xCompany|xName|xQty|xPrice|xPaid)$/;
+
+function saveBarTarget() {
+  const el = document.activeElement;
+  return el && el.id && SAVE_BAR_FIELDS.test(el.id) ? el : null;
+}
+
+function updateSaveBar() {
+  const bar = $('#saveBar');
+  if (!bar) return;
+  if (state.tab !== 'transactions' || !saveBarTarget()) {
+    bar.classList.add('hidden');
+    return;
+  }
+  bar.classList.remove('hidden');
+  // 키보드가 화면을 가리는 만큼 위로 올린다 (지원하지 않는 브라우저는 화면 하단)
+  const vv = window.visualViewport;
+  const gap = vv ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
+  bar.style.bottom = gap + 'px';
+
+  const isEasy = state.easyMode;
+  const qty = Number($(isEasy ? '#xQty' : '#eQty')?.value) || 0;
+  const price = Number($(isEasy ? '#xPrice' : '#ePrice')?.value) || 0;
+  const r = calcItem(qty, price, state.entryVat);
+  const total = r.supply + r.tax;
+  const name = ($(isEasy ? '#xName' : '#eName')?.value || '').trim();
+  const info = $('#saveBarInfo');
+  info.textContent = (name || '이전 품목') + ' · ' + won(total) + '원';
+  info.classList.toggle('neg', total < 0);
+}
+
+document.addEventListener('focusin', updateSaveBar);
+document.addEventListener('focusout', () => setTimeout(updateSaveBar, 80));
+document.addEventListener('input', (e) => {
+  if (saveBarTarget()) updateSaveBar();
+});
+if (window.visualViewport) {
+  window.visualViewport.addEventListener('resize', updateSaveBar);
+  window.visualViewport.addEventListener('scroll', updateSaveBar);
+}
+$('#saveBar').addEventListener('mousedown', (e) => e.preventDefault()); // 커서를 잃지 않게
+$('#saveBarBtn').addEventListener('click', () => {
+  if (state.easyMode) saveEasyEntry();
+  else saveEntry();
+});
+
 /* ─────────────── 커서 고정 ─────────────── */
 // 저장 후 커서가 돌아갈 칸을 지정한다 (지정 전 기본값은 품명).
 // PC: F2, 휴대폰: 📌 버튼. 기기에 기억되어 다음 접속에도 유지된다.
@@ -1166,6 +1215,27 @@ function updateSelSummary() {
   el.textContent = ` · ☑ 선택 ${sel.length}건: 합계 ${won(total)}원 · 입금 ${won(paid)}원 · 잔액 ${won(total - paid)}원`;
 }
 
+// 고정된 머리글·입력 행에 가려지지 않게 스크롤한다 (다음 줄까지 한 줄 더 보이도록)
+function scrollRowIntoView(tr) {
+  const wrap = $('.ledger-wrap');
+  if (!wrap || !tr) return;
+  const head = $('.ledger-table thead', wrap);
+  const entry = $('.entry-row', wrap);
+  const headH = head ? head.getBoundingClientRect().height : 0;
+  const entryH = entry ? entry.getBoundingClientRect().height : 0;
+  const wrapRect = wrap.getBoundingClientRect();
+  const rowRect = tr.getBoundingClientRect();
+  const lookahead = rowRect.height; // 다음에 체크될 줄도 미리 보이게
+  const topLimit = wrapRect.top + headH;
+  const bottomLimit = wrapRect.bottom - entryH;
+
+  if (rowRect.bottom + lookahead > bottomLimit) {
+    wrap.scrollTop += rowRect.bottom + lookahead - bottomLimit;
+  } else if (rowRect.top < topLimit) {
+    wrap.scrollTop -= topLimit - rowRect.top;
+  }
+}
+
 // 포인터(현재 위치) 행 표시 — 어느 행에서 이어갈지 파란 테두리로 보여준다
 function updatePointerHighlight() {
   const rows = $$('#txRows tr[data-id]');
@@ -1180,7 +1250,10 @@ function checkNextRow() {
   if (sheetLastIdx == null) return;
   const rows = $$('#txRows tr[data-id]');
   const next = rows[sheetLastIdx + 1];
-  if (!next) return;
+  if (!next) {
+    toast('마지막 줄입니다.');
+    return;
+  }
   sheetLastIdx += 1;
   const cb = next.querySelector('input[type="checkbox"]');
   if (cb && !cb.checked) {
@@ -1188,7 +1261,7 @@ function checkNextRow() {
     checkedTxIds.add(Number(next.dataset.id));
     next.classList.add('row-checked');
   }
-  next.scrollIntoView({ block: 'nearest' });
+  scrollRowIntoView(next);
   updatePointerHighlight();
   updateSelSummary();
 }
@@ -1198,9 +1271,12 @@ function skipNextRow() {
   if (sheetLastIdx == null) return;
   const rows = $$('#txRows tr[data-id]');
   const next = rows[sheetLastIdx + 1];
-  if (!next) return;
+  if (!next) {
+    toast('마지막 줄입니다.');
+    return;
+  }
   sheetLastIdx += 1;
-  next.scrollIntoView({ block: 'nearest' });
+  scrollRowIntoView(next);
   updatePointerHighlight();
 }
 
@@ -1217,7 +1293,7 @@ function undoCheckRow() {
     cur.classList.remove('row-checked');
   }
   sheetLastIdx -= 1; // -1이 되면 '첫 행 이전' 상태 — 다음 '='는 첫 행부터 체크
-  if (sheetLastIdx >= 0) rows[sheetLastIdx].scrollIntoView({ block: 'nearest' });
+  if (sheetLastIdx >= 0) scrollRowIntoView(rows[sheetLastIdx]);
   updatePointerHighlight();
   updateSelSummary();
 }
