@@ -486,6 +486,7 @@ async function renderTransactions() {
         </select>
         <button id="btnAddTx">＋ 여러 품목 거래</button>
         <button id="btnEasyOn" title="글씨를 크게 해서 하나씩 입력합니다">🔎 큰 글씨</button>
+        <button type="button" id="btnPin" class="pin-btn">📌<span id="pinLabel" class="pin-label">커서 고정</span></button>
       </div>
       <p class="summary"><span id="txSummary"></span><span id="selSummary" class="sel-summary"></span></p>
       <div class="table-wrap ledger-wrap">
@@ -518,6 +519,7 @@ async function renderTransactions() {
         <span><b>−</b> 건너뛰기</span>
         <span><b>Backspace</b> 되돌리기</span>
         <span><b>ESC</b> 빠른 검색</span>
+        <span><b>F2</b> 커서 고정</span>
         <button type="button" id="btnHelpInline" class="link-btn">자세한 사용법 보기</button>
       </p>
       <button type="button" class="fab" id="btnQuickSearch" title="빠른 검색 (ESC)">🔍 검색</button>
@@ -616,6 +618,9 @@ async function renderTransactions() {
   $('#btnHelp').addEventListener('click', startTour);
   $('#btnHelpInline').addEventListener('click', startTour);
   $('#btnEntrySave').addEventListener('click', saveEntry);
+  // 버튼을 누르면 포커스가 옮겨가므로 직전에 커서가 있던 칸을 기준으로 고정한다
+  $('#btnPin').addEventListener('mousedown', (e) => e.preventDefault());
+  $('#btnPin').addEventListener('click', () => togglePin(document.activeElement));
   $('.entry-row').addEventListener('keydown', (e) => {
     if (e.target.tagName !== 'INPUT') return;
     if (e.key === 'Enter') {
@@ -633,6 +638,7 @@ async function renderTransactions() {
     }
   });
   recomputeEntry();
+  updatePinUI();
   await drawTxRows();
   scrollSheetToBottom();
   maybeAutoTour(); // 처음 온 사용자에게 사용법 안내
@@ -700,6 +706,7 @@ async function renderTransactionsEasy() {
           <input id="xPaid" type="number" inputmode="numeric" placeholder="0">
         </div>
         <p class="easy-total">합계 <b id="xTotal">0원</b></p>
+        <button type="button" id="btnPin" class="pin-btn easy-pin">📌<span id="pinLabel" class="pin-label">커서 고정</span></button>
         <button type="submit" class="primary easy-save">저장하기</button>
       </form>
     </section>
@@ -779,12 +786,15 @@ async function renderTransactionsEasy() {
     easyRecompute();
   });
   $('#btnEasyOff').addEventListener('click', () => setEasyMode(false));
+  $('#btnPin').addEventListener('mousedown', (e) => e.preventDefault());
+  $('#btnPin').addEventListener('click', () => togglePin(document.activeElement));
   $('#easyForm').addEventListener('submit', (e) => {
     e.preventDefault();
     saveEasyEntry();
   });
 
   easyRecompute();
+  updatePinUI();
   await drawEasyList();
 }
 
@@ -848,7 +858,8 @@ async function saveEasyEntry() {
   easyRecompute();
   toast('저장했습니다.');
   await drawEasyList();
-  $('#xName').focus();
+  updatePinUI();
+  focusAfterSave('xName');
 }
 
 async function drawEasyList() {
@@ -890,6 +901,74 @@ async function drawEasyList() {
     }
   };
 }
+
+/* ─────────────── 커서 고정 ─────────────── */
+// 저장 후 커서가 돌아갈 칸을 지정한다 (지정 전 기본값은 품명).
+// PC: F2, 휴대폰: 📌 버튼. 기기에 기억되어 다음 접속에도 유지된다.
+const PIN_FIELDS = {
+  eDate: '날짜', eCompany: '상호', eName: '품명', eSpec: '규격',
+  eQty: '수량', ePrice: '단가', ePaid: '입금',
+  xDate: '날짜', xCompany: '상호', xName: '품명', xQty: '수량',
+  xPrice: '단가', xPaid: '받은 돈',
+};
+
+state.pinnedField = '';
+try {
+  const saved = localStorage.getItem('pinnedField');
+  if (saved && PIN_FIELDS[saved]) state.pinnedField = saved;
+} catch (e) { /* localStorage 사용 불가 환경 */ }
+
+// 저장 후 커서를 보낼 칸 (고정된 칸이 지금 화면에 없으면 품명으로)
+function focusAfterSave(defaultId) {
+  const el = (state.pinnedField && $('#' + state.pinnedField)) || $('#' + defaultId);
+  if (!el) return;
+  el.focus();
+  if (el.select) el.select();
+}
+
+function pinLabel() {
+  return state.pinnedField ? PIN_FIELDS[state.pinnedField] : '';
+}
+
+// 지금 커서가 있는 칸을 고정한다 (같은 칸을 다시 지정하면 해제)
+function togglePin(el) {
+  const target = el && el.id && PIN_FIELDS[el.id] ? el : null;
+  if (!target) {
+    toast('먼저 고정할 입력칸을 누르세요.');
+    return;
+  }
+  state.pinnedField = state.pinnedField === target.id ? '' : target.id;
+  try {
+    localStorage.setItem('pinnedField', state.pinnedField);
+  } catch (e) { /* 무시 */ }
+  toast(state.pinnedField ? `📌 '${pinLabel()}' 칸에 커서를 고정했습니다.` : '📌 커서 고정을 해제했습니다.');
+  updatePinUI();
+}
+
+// 고정된 칸에 표시를 붙이고 버튼 문구를 갱신한다
+function updatePinUI() {
+  $$('.pinned').forEach((el) => el.classList.remove('pinned'));
+  if (state.pinnedField) {
+    const el = $('#' + state.pinnedField);
+    if (el) el.classList.add('pinned');
+  }
+  const btn = $('#btnPin');
+  if (btn) {
+    btn.classList.toggle('on', !!state.pinnedField);
+    btn.title = state.pinnedField
+      ? `저장 후 '${pinLabel()}' 칸으로 돌아갑니다 (F2로 해제)`
+      : '커서 고정: 입력칸을 누른 뒤 이 버튼(또는 F2)을 누르세요';
+    const label = $('#pinLabel');
+    if (label) label.textContent = state.pinnedField ? pinLabel() : '커서 고정';
+  }
+}
+
+// F2: 지금 커서가 있는 칸을 고정 / 해제
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'F2' || state.tab !== 'transactions') return;
+  e.preventDefault();
+  togglePin(document.activeElement);
+});
 
 /* ─────────────── 이전 품목 그대로 적기 ─────────────── */
 // 품명을 비운 채 넘어가거나 저장하면 직전에 적은 품목을 그대로 불러온다.
@@ -986,7 +1065,8 @@ async function saveEntry() {
   await drawTxRows();
   toast('저장했습니다.');
   scrollSheetToBottom();
-  $('#eName').focus();
+  updatePinUI();
+  focusAfterSave('eName');
 }
 
 async function drawTxRows() {
@@ -1870,6 +1950,12 @@ const TOUR_STEPS = [
     body: '[명세표] 버튼으로 거래명세표를 띄워 인쇄하거나 PDF로 저장합니다. 공급받는자 정보는 명세표에서 바로 고칠 수 있고, 공급자 정보는 [내 정보] 탭에서 설정합니다.',
     pos: 'bottom',
     optional: true,
+  },
+  {
+    sel: '#btnPin',
+    title: '저장 후 커서 자리 정하기 (커서 고정)',
+    body: '저장하면 커서는 품명 칸으로 돌아갑니다. 다른 칸에서 이어 적고 싶으면, 그 칸을 누른 뒤 F2(또는 이 📌 버튼)를 누르세요. 저장할 때마다 고정한 칸으로 돌아갑니다. 한 번 더 누르면 해제됩니다.',
+    pos: 'top',
   },
   {
     sel: '#btnHelp',

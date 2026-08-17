@@ -215,6 +215,27 @@ form label input, form label select { margin-top: 0.2rem; font-weight: 400; }
 .range-sep { align-self: center; color: var(--sub); }
 #btnClearFilter { color: var(--sub); }
 
+/* 커서 고정 */
+.pin-btn { padding: 0.3rem 0.5rem; margin-right: 0.2rem; color: var(--sub); }
+.pin-btn.on { background: #fef3c7; border-color: #fbbf24; color: var(--warn); font-weight: 700; }
+.pin-label { margin-left: 0.25rem; font-size: 0.82rem; }
+.section-head .pin-btn { flex: 0 0 auto; }
+input.pinned, select.pinned {
+  border-color: #fbbf24;
+  box-shadow: 0 0 0 2px #fef3c7;
+  background: #fffbeb;
+}
+
+.easy-pin {
+  width: 100%;
+  font-size: 1.05rem;
+  padding: 0.65rem;
+  border-width: 2px;
+  border-radius: 10px;
+  margin-bottom: 0.7rem;
+}
+.easy-pin .pin-label { font-size: 1.05rem; margin-left: 0.35rem; }
+
 /* 장부 시트 빠른 입력 행 */
 .entry-row td { background: #eff6ff; padding: 0.35rem 0.25rem; }
 .entry-row input, .entry-row select { padding: 0.4rem 0.5rem; font-size: 0.88rem; }
