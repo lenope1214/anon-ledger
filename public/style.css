@@ -251,6 +251,25 @@ form label input, form label select { margin-top: 0.2rem; font-weight: 400; }
   body:has(#saveBar:not(.hidden)) .fab-help { display: none; }
 }
 
+/* 입금(수금) 줄 */
+.pay-btn { color: #15803d; border-color: #86efac; font-weight: 700; }
+.pay-btn:hover { background: #f0fdf4; }
+#txRows tr.row-pay td { background: #f0fdf4; }
+#txRows tr.row-pay.row-checked td { background: #fefce8; }
+.pay-label { color: #15803d; font-weight: 700; }
+.easy-item-pay { border-color: #86efac; background: #f0fdf4; }
+.easy-pay-btn {
+  width: 100%;
+  font-size: 1.2rem;
+  font-weight: 700;
+  padding: 0.85rem;
+  border-width: 2px;
+  border-radius: 12px;
+  color: #15803d;
+  border-color: #86efac;
+  margin-bottom: 1rem;
+}
+
 /* 커서 고정 */
 .pin-btn { padding: 0.3rem 0.5rem; margin-right: 0.2rem; color: var(--sub); }
 .pin-btn.on { background: #fef3c7; border-color: #fbbf24; color: var(--warn); font-weight: 700; }

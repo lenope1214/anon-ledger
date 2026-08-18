@@ -166,7 +166,7 @@ function drawCompanyRows() {
         <td>${esc(c.owner)}</td>
         <td>${esc(c.phone)}</td>
         <td class="num">${won(c.txCount)}건</td>
-        <td class="num ${c.outstanding > 0 ? 'warn' : ''}">${won(c.outstanding)}원</td>
+        <td class="num ${c.outstanding > 0 ? 'warn' : c.outstanding < 0 ? 'neg' : ''}">${won(c.outstanding)}원</td>
         <td class="actions">
           <button data-act="tx" data-id="${c.id}">거래보기</button>
           <button data-act="edit" data-id="${c.id}">수정</button>
@@ -452,7 +452,11 @@ function attachProductAutocomplete(input, getCompanyId, onPick) {
 
 /* ─────────────── 거래관리 (장부 시트) ─────────────── */
 let txCache = [];
-let checkedTxIds = new Set(); // 체크된 거래 id (새로고침 전까지 유지)
+let payCache = [];
+let checkedTxIds = new Set(); // 체크된 줄 (새로고침 전까지 유지, 't123'/'p45' 형태)
+
+const PAY_METHOD_LABEL = { cash: '현금', transfer: '계좌이체', card: '카드', note: '어음', etc: '기타' };
+const rowKey = (tr) => (tr.dataset.kind === 'pay' ? 'p' : 't') + tr.dataset.id;
 let sheetLastIdx = null;      // 마지막으로 체크한 행 위치 ('=' 연속 체크용)
 
 function setEasyMode(on) {
@@ -484,6 +488,7 @@ async function renderTransactions() {
         <select id="entryVat" class="vat-select" title="빠른 입력 부가세 방식">
           ${Object.entries(VAT_LABEL).map(([v, l]) => `<option value="${v}" ${v === state.entryVat ? 'selected' : ''}>${l}</option>`).join('')}
         </select>
+        <button id="btnAddPay" class="pay-btn">＋ 입금 받음</button>
         <button id="btnAddTx">＋ 여러 품목 거래</button>
         <button id="btnEasyOn" title="글씨를 크게 해서 하나씩 입력합니다">🔎 큰 글씨</button>
         <button type="button" id="btnPin" class="pin-btn">📌<span id="pinLabel" class="pin-label">커서 고정</span></button>
@@ -591,6 +596,7 @@ async function renderTransactions() {
     recomputeEntry();
   });
   $('#btnAddTx').addEventListener('click', () => openTxForm(null));
+  $('#btnAddPay').addEventListener('click', () => openPaymentForm(null));
   $('#btnEasyOn').addEventListener('click', () => setEasyMode(true));
   $('#eQty').addEventListener('input', () => {
     state.entryQtyTouched = true;
@@ -711,7 +717,8 @@ async function renderTransactionsEasy() {
       </form>
     </section>
     <section class="card easy-card">
-      <h2 class="easy-recent-title">최근에 적은 거래</h2>
+      <button type="button" id="btnAddPayEasy" class="easy-pay-btn">💰 돈 받았어요 (입금)</button>
+      <h2 class="easy-recent-title">최근에 적은 것</h2>
       <div id="easyList"></div>
     </section>`;
 
@@ -786,6 +793,7 @@ async function renderTransactionsEasy() {
     easyRecompute();
   });
   $('#btnEasyOff').addEventListener('click', () => setEasyMode(false));
+  $('#btnAddPayEasy').addEventListener('click', () => openPaymentForm(null));
   $('#btnPin').addEventListener('mousedown', (e) => e.preventDefault());
   $('#btnPin').addEventListener('click', () => togglePin(document.activeElement));
   $('#easyForm').addEventListener('submit', (e) => {
@@ -863,19 +871,38 @@ async function saveEasyEntry() {
 }
 
 async function drawEasyList() {
-  txCache = await api('GET', '/api/transactions');
+  const [txs, pays] = await Promise.all([api('GET', '/api/transactions'), api('GET', '/api/payments')]);
+  txCache = txs;
+  payCache = pays;
   const box = $('#easyList');
   if (!box) return;
-  const rows = txCache.slice(0, 15); // 최신순 15건
+  // 거래와 입금을 최신순으로 섞어 15건
+  const rows = [
+    ...txCache.map((t) => Object.assign({ kind: 'tx' }, t)),
+    ...payCache.map((x) => Object.assign({ kind: 'pay' }, x)),
+  ]
+    .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id)
+    .slice(0, 15);
   if (!rows.length) {
     box.innerHTML = '<p class="empty-cell">아직 적은 거래가 없습니다.</p>';
     return;
   }
   box.innerHTML = rows
     .map((t) => {
+      if (t.kind === 'pay') {
+        return `<div class="easy-item easy-item-pay" data-id="${t.id}" data-kind="pay">
+          <div class="easy-item-head"><b>${esc(t.companyName)}</b><span>${esc(t.date)}</span></div>
+          <div class="easy-item-name">💰 입금 ${esc(PAY_METHOD_LABEL[t.method] || '')}${t.memo ? ' · ' + esc(t.memo) : ''}</div>
+          <div class="easy-item-foot">
+            <b>${won(t.amount)}원</b>
+            <button type="button" data-act="pay-edit">고치기</button>
+            <button type="button" data-act="pay-del" class="danger">삭제</button>
+          </div>
+        </div>`;
+      }
       const it = t.items[0];
       const more = t.items.length > 1 ? ` 외 ${t.items.length - 1}건` : '';
-      return `<div class="easy-item" data-id="${t.id}">
+      return `<div class="easy-item" data-id="${t.id}" data-kind="tx">
         <div class="easy-item-head"><b>${esc(t.companyName)}</b><span>${esc(t.date)}</span></div>
         <div class="easy-item-name">${esc(it.name)}${more}</div>
         <div class="easy-item-foot">
@@ -889,14 +916,27 @@ async function drawEasyList() {
   box.onclick = async (e) => {
     const btn = e.target.closest('button[data-act]');
     if (!btn) return;
-    const id = Number(btn.closest('.easy-item').dataset.id);
+    const item = btn.closest('.easy-item');
+    const id = Number(item.dataset.id);
+    const act = btn.dataset.act;
+    if (act === 'pay-edit' || act === 'pay-del') {
+      const pay = payCache.find((x) => x.id === id);
+      if (!pay) return;
+      if (act === 'pay-edit') return openPaymentForm(pay);
+      if (!confirm(`${pay.date} '${pay.companyName}' 입금 ${won(pay.amount)}원을 지울까요?`)) return;
+      await api('DELETE', '/api/payments/' + id);
+      toast('지웠습니다.');
+      await refreshCompanies();
+      return drawEasyList();
+    }
     const t = txCache.find((x) => x.id === id);
     if (!t) return;
-    if (btn.dataset.act === 'sheet') openStatement(t);
-    else if (btn.dataset.act === 'del') {
+    if (act === 'sheet') openStatement(t);
+    else if (act === 'del') {
       if (!confirm(`${t.date} '${t.companyName}' 거래를 지울까요?`)) return;
       await api('DELETE', '/api/transactions/' + id);
       toast('지웠습니다.');
+      await refreshCompanies();
       drawEasyList();
     }
   };
@@ -1119,34 +1159,66 @@ async function saveEntry() {
 }
 
 async function drawTxRows() {
-  txCache = await api('GET', '/api/transactions' + (state.txCompanyId ? '?companyId=' + state.txCompanyId : ''));
+  const qs = state.txCompanyId ? '?companyId=' + state.txCompanyId : '';
+  const [txs, pays] = await Promise.all([
+    api('GET', '/api/transactions' + qs),
+    api('GET', '/api/payments' + qs),
+  ]);
+  txCache = txs;
+  payCache = pays;
   const tbody = $('#txRows');
   if (!tbody) return;
 
   // 날짜 범위·품명 검색 필터 (화면에서 걸러냄)
-  let list = txCache;
-  if (state.txFrom) list = list.filter((t) => t.date >= state.txFrom);
-  if (state.txTo) list = list.filter((t) => t.date <= state.txTo);
+  const inRange = (d) => (!state.txFrom || d >= state.txFrom) && (!state.txTo || d <= state.txTo);
   const q = state.txProductQuery.trim().toLowerCase();
+  let list = txCache.filter((t) => inRange(t.date));
   if (q) list = list.filter((t) => t.items.some((it) => it.name.toLowerCase().includes(q)));
+  // 품명으로 찾는 중에는 입금 줄을 숨긴다 (품명이 없는 줄이라 검색 대상이 아님)
+  const payList = q ? [] : payCache.filter((x) => inRange(x.date));
 
   const total = list.reduce((s, t) => s + t.total, 0);
-  const paid = list.reduce((s, t) => s + t.paid, 0);
-  $('#txSummary').textContent = `${list.length}건 · 합계 ${won(total)}원 · 입금 ${won(paid)}원 · 잔액 ${won(total - paid)}원`;
+  const paidInline = list.reduce((s, t) => s + t.paid, 0);
+  const received = payList.reduce((s, x) => s + x.amount, 0);
+  const paid = paidInline + received;
+  $('#txSummary').textContent =
+    `거래 ${list.length}건 · 합계 ${won(total)}원 · 받은 돈 ${won(paid)}원` +
+    (received ? ` (입금 ${payList.length}건 ${won(received)}원 포함)` : '') +
+    ` · 미수 ${won(total - paid)}원`;
   updateSelSummary();
 
-  const rows = [...list].sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id); // 옛날 → 최신
+  // 거래와 입금을 한 장부로 합쳐 옛날 → 최신 순으로 보여준다
+  const rows = [
+    ...list.map((t) => Object.assign({ kind: 'tx' }, t)),
+    ...payList.map((x) => Object.assign({ kind: 'pay' }, x)),
+  ].sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
+
   if (!rows.length) {
     tbody.innerHTML = `<tr><td colspan="13" class="empty-cell">${txCache.length ? '검색 조건에 맞는 거래가 없습니다.' : '아직 거래가 없습니다. 아래 파란 입력 행에서 첫 거래를 적어보세요.'}</td></tr>`;
     return;
   }
   tbody.innerHTML = rows
     .map((t, i) => {
+      if (t.kind === 'pay') {
+        const checked = checkedTxIds.has('p' + t.id);
+        return `<tr data-id="${t.id}" data-kind="pay" data-idx="${i}" class="row-pay ${checked ? 'row-checked' : ''}">
+          <td class="chk"><input type="checkbox" ${checked ? 'checked' : ''}></td>
+          <td>${esc(t.date)}</td>
+          <td><b>${esc(t.companyName)}</b></td>
+          <td colspan="6" class="pay-label">💰 입금 <span class="sub">${PAY_METHOD_LABEL[t.method] || ''}${t.memo ? ' · ' + esc(t.memo) : ''}</span></td>
+          <td class="num"><b>${won(t.amount)}</b></td>
+          <td class="num">—</td>
+          <td class="actions">
+            <button data-act="pay-edit" data-id="${t.id}">수정</button>
+            <button data-act="pay-del" data-id="${t.id}" class="danger" title="삭제">✕</button>
+          </td>
+        </tr>`;
+      }
       const single = t.items.length === 1;
       const it = t.items[0];
       const balance = t.total - t.paid;
-      const checked = checkedTxIds.has(t.id);
-      return `<tr data-id="${t.id}" data-idx="${i}" class="${checked ? 'row-checked' : ''}">
+      const checked = checkedTxIds.has('t' + t.id);
+      return `<tr data-id="${t.id}" data-kind="tx" data-idx="${i}" class="${checked ? 'row-checked' : ''}">
         <td class="chk"><input type="checkbox" ${checked ? 'checked' : ''}></td>
         <td>${esc(t.date)}</td>
         <td><b>${esc(t.companyName)}</b></td>
@@ -1171,14 +1243,29 @@ async function drawTxRows() {
     const btn = e.target.closest('button[data-act]');
     if (btn) {
       const id = Number(btn.dataset.id);
+      const act = btn.dataset.act;
+      if (act === 'pay-edit' || act === 'pay-del') {
+        const pay = payCache.find((x) => x.id === id);
+        if (!pay) return;
+        if (act === 'pay-edit') openPaymentForm(pay);
+        else {
+          if (!confirm(`${pay.date} '${pay.companyName}' 입금 ${won(pay.amount)}원을 삭제할까요?`)) return;
+          await api('DELETE', '/api/payments/' + id);
+          checkedTxIds.delete('p' + id);
+          toast('입금 내역을 삭제했습니다.');
+          await refreshCompanies();
+          drawTxRows();
+        }
+        return;
+      }
       const t = txCache.find((x) => x.id === id);
       if (!t) return;
-      if (btn.dataset.act === 'sheet') openStatement(t);
-      else if (btn.dataset.act === 'edit') openTxForm(t);
-      else if (btn.dataset.act === 'del') {
+      if (act === 'sheet') openStatement(t);
+      else if (act === 'edit') openTxForm(t);
+      else if (act === 'del') {
         if (!confirm(`${t.date} '${t.companyName}' 거래를 삭제할까요?`)) return;
         await api('DELETE', '/api/transactions/' + id);
-        checkedTxIds.delete(id);
+        checkedTxIds.delete('t' + id);
         toast('거래를 삭제했습니다.');
         drawTxRows();
       }
@@ -1190,7 +1277,7 @@ async function drawTxRows() {
     const cb = tr.querySelector('input[type="checkbox"]');
     if (!cb) return;
     if (e.target !== cb) cb.checked = !cb.checked;
-    const id = Number(tr.dataset.id);
+    const id = rowKey(tr);
     if (cb.checked) checkedTxIds.add(id);
     else checkedTxIds.delete(id);
     tr.classList.toggle('row-checked', cb.checked);
@@ -1205,14 +1292,16 @@ async function drawTxRows() {
 function updateSelSummary() {
   const el = $('#selSummary');
   if (!el) return;
-  const sel = txCache.filter((t) => checkedTxIds.has(t.id));
-  if (!sel.length) {
+  const sel = txCache.filter((t) => checkedTxIds.has('t' + t.id));
+  const selPay = payCache.filter((x) => checkedTxIds.has('p' + x.id));
+  const count = sel.length + selPay.length;
+  if (!count) {
     el.textContent = '';
     return;
   }
   const total = sel.reduce((s, t) => s + t.total, 0);
-  const paid = sel.reduce((s, t) => s + t.paid, 0);
-  el.textContent = ` · ☑ 선택 ${sel.length}건: 합계 ${won(total)}원 · 입금 ${won(paid)}원 · 잔액 ${won(total - paid)}원`;
+  const paid = sel.reduce((s, t) => s + t.paid, 0) + selPay.reduce((s, x) => s + x.amount, 0);
+  el.textContent = ` · ☑ 선택 ${count}건: 합계 ${won(total)}원 · 받은 돈 ${won(paid)}원 · 미수 ${won(total - paid)}원`;
 }
 
 // 고정된 머리글·입력 행에 가려지지 않게 스크롤한다 (다음 줄까지 한 줄 더 보이도록)
@@ -1258,7 +1347,7 @@ function checkNextRow() {
   const cb = next.querySelector('input[type="checkbox"]');
   if (cb && !cb.checked) {
     cb.checked = true;
-    checkedTxIds.add(Number(next.dataset.id));
+    checkedTxIds.add(rowKey(next));
     next.classList.add('row-checked');
   }
   scrollRowIntoView(next);
@@ -1289,7 +1378,7 @@ function undoCheckRow() {
   const cb = cur.querySelector('input[type="checkbox"]');
   if (cb && cb.checked) {
     cb.checked = false;
-    checkedTxIds.delete(Number(cur.dataset.id));
+    checkedTxIds.delete(rowKey(cur));
     cur.classList.remove('row-checked');
   }
   sheetLastIdx -= 1; // -1이 되면 '첫 행 이전' 상태 — 다음 '='는 첫 행부터 체크
@@ -1674,6 +1763,62 @@ async function openTxForm(tx) {
 
   if (tx) tx.items.forEach((it) => addRow(it));
   else addRow(null);
+}
+
+/* ─────────────── 입금(수금) 입력 ─────────────── */
+async function openPaymentForm(pay) {
+  await refreshCompanies();
+  const company = pay ? state.companies.find((c) => c.id === pay.companyId) : null;
+  const preset = company || state.companies.find((c) => String(c.id) === String(state.entryCompanyId || state.txCompanyId));
+  openModal(`
+    <h2>${pay ? '입금 수정' : '입금 받음'}</h2>
+    <p class="hint">거래와 별개로 받은 돈을 적습니다. 미수금에서 자동으로 빠집니다.</p>
+    <form id="payForm">
+      <label>상호 *<input name="companyName" id="payCompany" required autocomplete="off" placeholder="상호 입력·검색" value="${esc(preset && preset.name)}"></label>
+      <div class="form-grid">
+        <label>날짜<input name="date" type="date" value="${esc(pay ? pay.date : today())}"></label>
+        <label>받은 금액 *<input name="amount" type="number" inputmode="numeric" required value="${pay ? pay.amount : ''}" placeholder="0"></label>
+      </div>
+      <div class="form-grid">
+        <label>받은 방법
+          <select name="method">
+            ${Object.entries(PAY_METHOD_LABEL).map(([v, l]) => `<option value="${v}" ${pay && pay.method === v ? 'selected' : ''}>${l}</option>`).join('')}
+          </select>
+        </label>
+        <label>메모<input name="memo" value="${esc(pay && pay.memo)}"></label>
+      </div>
+      <div class="form-actions">
+        <button type="button" data-close>취소</button>
+        <button type="submit" class="primary">저장</button>
+      </div>
+    </form>`);
+  $('[data-close]').addEventListener('click', closeModal);
+  attachSearchDropdown($('#payCompany'), {
+    minChars: 0,
+    enterPicksFirst: true,
+    getItems: async (q) => state.companies.filter((c) => !q || c.name.toLowerCase().includes(q)),
+    itemHtml: (c) => `<b>${esc(c.name)}</b><span class="ac-price">미수 ${won(c.outstanding)}원</span>`,
+    onPick: (c) => {
+      $('#payCompany').value = c.name;
+      $('#payForm').amount.focus();
+    },
+  });
+  $('#payForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = Object.fromEntries(new FormData(e.target));
+    body.amount = Number(body.amount) || 0;
+    try {
+      if (pay) await api('PUT', '/api/payments/' + pay.id, body);
+      else await api('POST', '/api/payments', body);
+      closeModal();
+      toast('입금 내역을 저장했습니다.');
+      await refreshCompanies();
+      if (state.easyMode) drawEasyList();
+      else drawTxRows();
+    } catch (err) {
+      alert(err.message);
+    }
+  });
 }
 
 /* ── 거래명세표 ── */
