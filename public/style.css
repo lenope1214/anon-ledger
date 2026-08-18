@@ -251,6 +251,11 @@ form label input, form label select { margin-top: 0.2rem; font-weight: 400; }
   body:has(#saveBar:not(.hidden)) .fab-help { display: none; }
 }
 
+/* 집계표 */
+.report-tabs { flex: 1 1 auto; margin-bottom: 0; min-width: 15rem; }
+.report-tabs button { flex: 1; }
+#reportTable tfoot th { background: #f8fafc; font-weight: 800; }
+
 /* 거래처원장 */
 .ledger-doc { width: 100%; }
 .ledger-doc tbody tr.row-pay td { background: #f0fdf4; }

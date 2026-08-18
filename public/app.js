@@ -110,6 +110,7 @@ function render() {
   else if (state.tab === 'products') renderProducts();
   else if (state.tab === 'transactions') renderTransactions();
   else if (state.tab === 'ledger') renderCompanyLedger();
+  else if (state.tab === 'reports') renderReports();
   else if (state.tab === 'admin') renderAdmin();
   else renderSettings();
 }
@@ -331,6 +332,8 @@ async function renderCompanyLedger() {
   });
   $('#btnLgPrint').addEventListener('click', () => {
     $('#printSheet').innerHTML = $('#ledgerSheet').innerHTML;
+    statementCtx = null;
+    $('#btnShareSheet').classList.add('hidden');
     document.body.classList.add('printing');
     $('#printOverlay').classList.remove('hidden');
   });
@@ -339,6 +342,176 @@ async function renderCompanyLedger() {
 function itemLabel(t) {
   const it = t.items[0];
   return it.name + (t.items.length > 1 ? ` 외 ${t.items.length - 1}건` : '') + (it.spec ? ` (${it.spec})` : '');
+}
+
+/* ─────────────── 집계 (월별·거래처별·품목별) ─────────────── */
+const reportView = { mode: 'month', year: '' };
+
+async function renderReports() {
+  await refreshCompanies();
+  const [txs, pays] = await Promise.all([api('GET', '/api/transactions'), api('GET', '/api/payments')]);
+  const years = [...new Set([...txs.map((t) => t.date.slice(0, 4)), ...pays.map((p) => p.date.slice(0, 4))])].sort().reverse();
+  if (!reportView.year || !years.includes(reportView.year)) reportView.year = years[0] || String(new Date().getFullYear());
+  const y = reportView.year;
+
+  const MODES = { month: '월별 현황', company: '거래처별', product: '품목별' };
+  let table = '';
+
+  if (reportView.mode === 'month') {
+    // 1~12월 매출·입금·잔액
+    const rows = [];
+    let cumulative = 0;
+    for (let m = 1; m <= 12; m++) {
+      const key = `${y}-${String(m).padStart(2, '0')}`;
+      const sales = txs.filter((t) => t.date.startsWith(key)).reduce((s, t) => s + t.total, 0);
+      const received =
+        txs.filter((t) => t.date.startsWith(key)).reduce((s, t) => s + t.paid, 0) +
+        pays.filter((p) => p.date.startsWith(key)).reduce((s, p) => s + p.amount, 0);
+      const count = txs.filter((t) => t.date.startsWith(key)).length;
+      if (!sales && !received && !count) continue;
+      cumulative += sales - received;
+      rows.push({ label: `${m}월`, count, sales, received, balance: cumulative });
+    }
+    table = reportTable(['월', '건수', '매출', '받은 돈', '누적 미수'], rows, true);
+  } else if (reportView.mode === 'company') {
+    const rows = state.companies
+      .map((c) => {
+        const ts = txs.filter((t) => t.companyId === c.id && t.date.startsWith(y));
+        const sales = ts.reduce((s, t) => s + t.total, 0);
+        const received =
+          ts.reduce((s, t) => s + t.paid, 0) +
+          pays.filter((p) => p.companyId === c.id && p.date.startsWith(y)).reduce((s, p) => s + p.amount, 0);
+        return { label: c.name, count: ts.length, sales, received, balance: c.outstanding };
+      })
+      .filter((r) => r.count || r.sales || r.received || r.balance)
+      .sort((a, b) => b.sales - a.sales);
+    table = reportTable(['상호', '건수', '매출', '받은 돈', '현재 미수'], rows);
+  } else {
+    const map = new Map();
+    txs
+      .filter((t) => t.date.startsWith(y))
+      .forEach((t) =>
+        t.items.forEach((it) => {
+          const cur = map.get(it.name) || { label: it.name, count: 0, qty: 0, sales: 0 };
+          cur.count += 1;
+          cur.qty += it.qty;
+          cur.sales += it.supply + it.tax;
+          map.set(it.name, cur);
+        })
+      );
+    const rows = [...map.values()].sort((a, b) => b.sales - a.sales);
+    table = reportTable(['품명', '건수', '수량', '매출'], rows, false, true);
+  }
+
+  $('#main').innerHTML = `
+    <section class="card">
+      <div class="section-head">
+        <select id="rpYear">${years.map((v) => `<option ${v === y ? 'selected' : ''}>${v}</option>`).join('')}</select>
+        <div class="auth-tabs report-tabs">
+          ${Object.entries(MODES).map(([k, l]) => `<button type="button" data-mode="${k}" class="${k === reportView.mode ? 'active' : ''}">${l}</button>`).join('')}
+        </div>
+        <button id="btnCsv">📄 엑셀(CSV) 내려받기</button>
+      </div>
+      <div class="table-wrap">${table}</div>
+      <p class="hint">${y}년 기준입니다. 표를 그대로 엑셀로 받아 세무사에게 전달할 수 있습니다.</p>
+    </section>`;
+
+  $('#rpYear').addEventListener('change', (e) => {
+    reportView.year = e.target.value;
+    renderReports();
+  });
+  $$('.report-tabs button').forEach((b) =>
+    b.addEventListener('click', () => {
+      reportView.mode = b.dataset.mode;
+      renderReports();
+    })
+  );
+  $('#btnCsv').addEventListener('click', () => downloadTableCsv(`${y}_${reportView.mode}`));
+}
+
+function reportTable(heads, rows, cumulative, isProduct) {
+  if (!rows.length) return '<p class="empty-cell">이 해에 기록된 내역이 없습니다.</p>';
+  const sum = rows.reduce(
+    (a, r) => ({ count: a.count + r.count, qty: a.qty + (r.qty || 0), sales: a.sales + r.sales, received: a.received + (r.received || 0) }),
+    { count: 0, qty: 0, sales: 0, received: 0 }
+  );
+  return `<table id="reportTable">
+    <thead><tr>${heads.map((h, i) => `<th class="${i ? 'num' : ''}">${h}</th>`).join('')}</tr></thead>
+    <tbody>
+      ${rows
+        .map(
+          (r) => `<tr>
+            <td><b>${esc(r.label)}</b></td>
+            <td class="num">${won(r.count)}</td>
+            ${isProduct ? `<td class="num">${won(r.qty)}</td>` : ''}
+            <td class="num ${r.sales < 0 ? 'neg' : ''}">${won(r.sales)}</td>
+            ${isProduct ? '' : `<td class="num">${won(r.received)}</td>`}
+            ${isProduct ? '' : `<td class="num ${r.balance > 0 ? 'warn' : r.balance < 0 ? 'neg' : ''}"><b>${won(r.balance)}</b></td>`}
+          </tr>`
+        )
+        .join('')}
+    </tbody>
+    <tfoot><tr>
+      <th>합계</th><th class="num">${won(sum.count)}</th>
+      ${isProduct ? `<th class="num">${won(sum.qty)}</th>` : ''}
+      <th class="num">${won(sum.sales)}</th>
+      ${isProduct ? '' : `<th class="num">${won(sum.received)}</th>`}
+      ${isProduct ? '' : `<th class="num">${cumulative ? '' : won(rows.reduce((a, r) => a + r.balance, 0))}</th>`}
+    </tr></tfoot>
+  </table>`;
+}
+
+// 화면의 표를 그대로 CSV로 저장 (엑셀에서 바로 열림)
+function downloadTableCsv(name) {
+  const table = $('#reportTable');
+  if (!table) return toast('내려받을 내용이 없습니다.');
+  const lines = [...table.querySelectorAll('tr')].map((tr) =>
+    [...tr.children]
+      .map((td) => {
+        const v = td.textContent.trim().replace(/,/g, '');
+        return /["\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+      })
+      .join(',')
+  );
+  const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  downloadBlob(blob, `거래장부_${name}.csv`);
+  toast('엑셀 파일을 내려받았습니다.');
+}
+
+function downloadBlob(blob, filename) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a); // 일부 브라우저는 문서에 붙어 있어야 동작한다
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// 거래·입금 내역을 그대로 엑셀(CSV)로 내려받는다 (지금 걸린 검색 조건 기준)
+function exportTransactionsCsv() {
+  const inRange = (d) => (!state.txFrom || d >= state.txFrom) && (!state.txTo || d <= state.txTo);
+  const q = state.txProductQuery.trim().toLowerCase();
+  const txRows = txCache
+    .filter((t) => inRange(t.date))
+    .filter((t) => !q || t.items.some((it) => it.name.toLowerCase().includes(q)))
+    .flatMap((t) =>
+      t.items.map((it) => [t.date, t.companyName, '거래', it.name, it.spec, it.qty, it.price, it.supply, it.tax, it.supply + it.tax, '', t.memo])
+    );
+  const payRows = (q ? [] : payCache.filter((x) => inRange(x.date))).map((x) => [
+    x.date, x.companyName, '입금', PAY_METHOD_LABEL[x.method] || '', '', '', '', '', '', '', x.amount, x.memo,
+  ]);
+  const rows = [...txRows, ...payRows].sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+  if (!rows.length) return toast('내려받을 내역이 없습니다.');
+  const head = ['날짜', '상호', '구분', '품명', '규격', '수량', '단가', '공급가액', '세액', '합계', '입금', '메모'];
+  const csv = [head, ...rows]
+    .map((r) => r.map((v) => {
+      const t = String(v == null ? '' : v);
+      return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+    }).join(','))
+    .join('\n');
+  downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }), `거래장부_거래내역_${today()}.csv`);
+  toast(`${rows.length}줄을 엑셀 파일로 내려받았습니다.`);
 }
 
 /* ─────────────── 제품관리 ─────────────── */
@@ -608,6 +781,7 @@ async function renderTransactions() {
         <button id="btnAddTx">＋ 여러 품목 거래</button>
         <button id="btnEasyOn" title="글씨를 크게 해서 하나씩 입력합니다">🔎 큰 글씨</button>
         <button type="button" id="btnPin" class="pin-btn">📌<span id="pinLabel" class="pin-label">커서 고정</span></button>
+        <button type="button" id="btnTxCsv">📄 엑셀</button>
       </div>
       <p class="summary"><span id="txSummary"></span><span id="selSummary" class="sel-summary"></span></p>
       <div class="table-wrap ledger-wrap">
@@ -713,6 +887,7 @@ async function renderTransactions() {
   });
   $('#btnAddTx').addEventListener('click', () => openTxForm(null));
   $('#btnAddPay').addEventListener('click', () => openPaymentForm(null));
+  $('#btnTxCsv').addEventListener('click', exportTransactionsCsv);
   $('#btnEasyOn').addEventListener('click', () => setEasyMode(true));
   $('#eQty').addEventListener('input', () => {
     state.entryQtyTouched = true;
@@ -2025,9 +2200,51 @@ function openStatement(tx) {
       }
     });
   });
+  statementCtx = { tx, company };
+  $('#btnShareSheet').classList.remove('hidden');
   document.body.classList.add('printing');
   $('#printOverlay').classList.remove('hidden');
 }
+
+// 거래명세표를 카톡·문자로 보내기 좋은 글로 만든다
+function statementText(tx, company) {
+  const s = state.settings;
+  const lines = [
+    `[거래명세서] ${tx.date}`,
+    `${company.name} 귀하`,
+    '',
+    ...tx.items.map((it) => `· ${it.name}${it.spec ? '(' + it.spec + ')' : ''} ${won(it.qty)}개 x ${won(it.price)}원 = ${won(it.supply + it.tax)}원`),
+    '',
+    `공급가액 ${won(tx.supplyTotal)}원 / 세액 ${won(tx.taxTotal)}원`,
+    `합계 ${won(tx.total)}원`,
+  ];
+  if (tx.paid) lines.push(`입금 ${won(tx.paid)}원 / 잔액 ${won(tx.total - tx.paid)}원`);
+  if (tx.memo) lines.push(`비고: ${tx.memo}`);
+  if (s.name) {
+    lines.push('', `${s.name}${s.owner ? ' ' + s.owner : ''}`);
+    if (s.phone) lines.push(s.phone);
+    if (s.bizNo) lines.push(`사업자 ${s.bizNo}`);
+  }
+  return lines.join('\n');
+}
+
+let statementCtx = null; // 지금 열려 있는 명세표
+
+$('#btnShareSheet').addEventListener('click', async () => {
+  if (!statementCtx) return;
+  const text = statementText(statementCtx.tx, statementCtx.company);
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: '거래명세서', text });
+      return;
+    }
+    await navigator.clipboard.writeText(text);
+    toast('명세서 내용을 복사했습니다. 카톡에 붙여넣으세요.');
+  } catch (e) {
+    if (e && e.name === 'AbortError') return; // 사용자가 공유를 취소함
+    prompt('아래 내용을 복사해 보내세요.', text);
+  }
+});
 
 $('#btnDoPrint').addEventListener('click', () => window.print());
 $('#btnClosePrint').addEventListener('click', () => {
@@ -2432,7 +2649,7 @@ $('#btnLogout').addEventListener('click', async () => {
     .then((v) => { $('#verFooter').textContent = `거래장부 v${v.version} · ${v.commit}`; })
     .catch(() => {});
   const hash = location.hash.slice(1);
-  if (['companies', 'products', 'transactions', 'settings', 'admin'].includes(hash)) {
+  if (['companies', 'products', 'transactions', 'reports', 'settings', 'admin'].includes(hash)) {
     state.tab = hash;
     $$('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === hash));
   }
