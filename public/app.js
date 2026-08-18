@@ -109,6 +109,8 @@ function render() {
   if (state.tab === 'companies') renderCompanies();
   else if (state.tab === 'products') renderProducts();
   else if (state.tab === 'transactions') renderTransactions();
+  else if (state.tab === 'ledger') renderCompanyLedger();
+  else if (state.tab === 'reports') renderReports();
   else if (state.tab === 'admin') renderAdmin();
   else renderSettings();
 }
@@ -166,8 +168,9 @@ function drawCompanyRows() {
         <td>${esc(c.owner)}</td>
         <td>${esc(c.phone)}</td>
         <td class="num">${won(c.txCount)}건</td>
-        <td class="num ${c.outstanding > 0 ? 'warn' : ''}">${won(c.outstanding)}원</td>
+        <td class="num ${c.outstanding > 0 ? 'warn' : c.outstanding < 0 ? 'neg' : ''}">${won(c.outstanding)}원</td>
         <td class="actions">
+          <button data-act="ledger" data-id="${c.id}" class="primary">원장</button>
           <button data-act="tx" data-id="${c.id}">거래보기</button>
           <button data-act="edit" data-id="${c.id}">수정</button>
           <button data-act="del" data-id="${c.id}" class="danger">삭제</button>
@@ -182,6 +185,7 @@ function drawCompanyRows() {
     const c = state.companies.find((x) => x.id === id);
     if (!c) return;
     if (btn.dataset.act === 'edit') openCompanyForm(c);
+    else if (btn.dataset.act === 'ledger') openCompanyLedger(c.id);
     else if (btn.dataset.act === 'tx') {
       state.txCompanyId = String(id);
       $(`#tabs button[data-tab="transactions"]`).click();
@@ -223,6 +227,291 @@ function openCompanyForm(c) {
       alert(err.message);
     }
   });
+}
+
+/* ─────────────── 거래처원장 ─────────────── */
+// 한 상호의 거래·입금을 날짜순으로 늘어놓고 누적 잔액(미수금)을 보여준다.
+const ledgerView = { companyId: null, from: '', to: '' };
+
+function openCompanyLedger(companyId) {
+  ledgerView.companyId = companyId;
+  state.tab = 'ledger';
+  $$('#tabs button').forEach((b) => b.classList.remove('active'));
+  render();
+}
+
+async function renderCompanyLedger() {
+  const c = state.companies.find((x) => x.id === ledgerView.companyId);
+  if (!c) {
+    state.tab = 'companies';
+    return render();
+  }
+  const [txs, pays] = await Promise.all([
+    api('GET', '/api/transactions?companyId=' + c.id),
+    api('GET', '/api/payments?companyId=' + c.id),
+  ]);
+
+  const inRange = (d) => (!ledgerView.from || d >= ledgerView.from) && (!ledgerView.to || d <= ledgerView.to);
+  const all = [
+    ...txs.map((t) => ({ kind: 'tx', date: t.date, id: t.id, label: itemLabel(t), amount: t.total, paid: t.paid, tx: t })),
+    ...pays.map((x) => ({ kind: 'pay', date: x.date, id: x.id, label: '💰 입금 ' + (PAY_METHOD_LABEL[x.method] || '') + (x.memo ? ' · ' + x.memo : ''), amount: 0, paid: x.amount })),
+  ].sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
+
+  // 기간 시작 전까지의 잔액을 '이월'로 먼저 깐다
+  const before = all.filter((r) => !inRange(r.date) && (!ledgerView.from || r.date < ledgerView.from));
+  const carry = before.reduce((s, r) => s + r.amount - r.paid, 0);
+  const rows = all.filter((r) => inRange(r.date));
+
+  let bal = carry;
+  const body = rows
+    .map((r) => {
+      bal += r.amount - r.paid;
+      return `<tr class="${r.kind === 'pay' ? 'row-pay' : ''}">
+        <td>${esc(r.date)}</td>
+        <td>${esc(r.label)}</td>
+        <td class="num ${r.amount < 0 ? 'neg' : ''}">${r.amount ? won(r.amount) : ''}</td>
+        <td class="num">${r.paid ? won(r.paid) : ''}</td>
+        <td class="num ${bal > 0 ? 'warn' : bal < 0 ? 'neg' : ''}"><b>${won(bal)}</b></td>
+      </tr>`;
+    })
+    .join('');
+
+  const sales = rows.reduce((s, r) => s + r.amount, 0);
+  const received = rows.reduce((s, r) => s + r.paid, 0);
+
+  $('#main').innerHTML = `
+    <section class="card">
+      <div class="section-head">
+        <button id="btnLedgerBack">← 상호 목록</button>
+        <input type="date" id="lgFrom" class="date-filter" value="${esc(ledgerView.from)}" title="시작일">
+        <span class="range-sep">~</span>
+        <input type="date" id="lgTo" class="date-filter" value="${esc(ledgerView.to)}" title="종료일">
+        <button id="btnLgClear">전체 기간</button>
+        <button id="btnLgPay" class="pay-btn">＋ 입금 받음</button>
+        <button id="btnLgPrint" class="primary">🖨 원장 인쇄</button>
+      </div>
+      <div id="ledgerSheet">
+        <div class="sheet">
+          <h2 class="sheet-title">거 래 처 원 장</h2>
+          <p class="sheet-date">${esc(c.name)}${c.owner ? ' (' + esc(c.owner) + ')' : ''} · 기간: ${esc(ledgerView.from || '처음')} ~ ${esc(ledgerView.to || '오늘')}</p>
+          <table class="sheet-items ledger-doc">
+            <thead><tr><th>날짜</th><th>내용</th><th class="num">매출</th><th class="num">입금</th><th class="num">잔액(미수)</th></tr></thead>
+            <tbody>
+              ${carry ? `<tr class="carry-row"><td>이월</td><td>이전 기간 미수금</td><td class="num"></td><td class="num"></td><td class="num"><b>${won(carry)}</b></td></tr>` : ''}
+              ${body || `<tr><td colspan="5" class="empty-cell">이 기간에 거래·입금 내역이 없습니다.</td></tr>`}
+            </tbody>
+            <tfoot>
+              <tr><th>합계</th><th></th><th class="num">${won(sales)}</th><th class="num">${won(received)}</th><th class="num"><b>${won(bal)}</b></th></tr>
+            </tfoot>
+          </table>
+          <p class="sheet-memo">현재 미수금 <b>${won(bal)}원</b>${ledgerView.from || ledgerView.to ? ' (표시 기간 기준)' : ''}</p>
+        </div>
+      </div>
+    </section>`;
+
+  $('#btnLedgerBack').addEventListener('click', () => {
+    const btn = $('#tabs button[data-tab="companies"]');
+    if (btn) btn.click();
+  });
+  $('#lgFrom').addEventListener('change', (e) => {
+    ledgerView.from = e.target.value;
+    renderCompanyLedger();
+  });
+  $('#lgTo').addEventListener('change', (e) => {
+    ledgerView.to = e.target.value;
+    renderCompanyLedger();
+  });
+  $('#btnLgClear').addEventListener('click', () => {
+    ledgerView.from = '';
+    ledgerView.to = '';
+    renderCompanyLedger();
+  });
+  $('#btnLgPay').addEventListener('click', () => {
+    state.entryCompanyId = String(c.id);
+    openPaymentForm(null);
+  });
+  $('#btnLgPrint').addEventListener('click', () => {
+    $('#printSheet').innerHTML = $('#ledgerSheet').innerHTML;
+    statementCtx = null;
+    $('#btnShareSheet').classList.add('hidden');
+    document.body.classList.add('printing');
+    $('#printOverlay').classList.remove('hidden');
+  });
+}
+
+function itemLabel(t) {
+  const it = t.items[0];
+  return it.name + (t.items.length > 1 ? ` 외 ${t.items.length - 1}건` : '') + (it.spec ? ` (${it.spec})` : '');
+}
+
+/* ─────────────── 집계 (월별·거래처별·품목별) ─────────────── */
+const reportView = { mode: 'month', year: '' };
+
+async function renderReports() {
+  await refreshCompanies();
+  const [txs, pays] = await Promise.all([api('GET', '/api/transactions'), api('GET', '/api/payments')]);
+  const years = [...new Set([...txs.map((t) => t.date.slice(0, 4)), ...pays.map((p) => p.date.slice(0, 4))])].sort().reverse();
+  if (!reportView.year || !years.includes(reportView.year)) reportView.year = years[0] || String(new Date().getFullYear());
+  const y = reportView.year;
+
+  const MODES = { month: '월별 현황', company: '거래처별', product: '품목별' };
+  let table = '';
+
+  if (reportView.mode === 'month') {
+    // 1~12월 매출·입금·잔액
+    const rows = [];
+    let cumulative = 0;
+    for (let m = 1; m <= 12; m++) {
+      const key = `${y}-${String(m).padStart(2, '0')}`;
+      const sales = txs.filter((t) => t.date.startsWith(key)).reduce((s, t) => s + t.total, 0);
+      const received =
+        txs.filter((t) => t.date.startsWith(key)).reduce((s, t) => s + t.paid, 0) +
+        pays.filter((p) => p.date.startsWith(key)).reduce((s, p) => s + p.amount, 0);
+      const count = txs.filter((t) => t.date.startsWith(key)).length;
+      if (!sales && !received && !count) continue;
+      cumulative += sales - received;
+      rows.push({ label: `${m}월`, count, sales, received, balance: cumulative });
+    }
+    table = reportTable(['월', '건수', '매출', '받은 돈', '누적 미수'], rows, true);
+  } else if (reportView.mode === 'company') {
+    const rows = state.companies
+      .map((c) => {
+        const ts = txs.filter((t) => t.companyId === c.id && t.date.startsWith(y));
+        const sales = ts.reduce((s, t) => s + t.total, 0);
+        const received =
+          ts.reduce((s, t) => s + t.paid, 0) +
+          pays.filter((p) => p.companyId === c.id && p.date.startsWith(y)).reduce((s, p) => s + p.amount, 0);
+        return { label: c.name, count: ts.length, sales, received, balance: c.outstanding };
+      })
+      .filter((r) => r.count || r.sales || r.received || r.balance)
+      .sort((a, b) => b.sales - a.sales);
+    table = reportTable(['상호', '건수', '매출', '받은 돈', '현재 미수'], rows);
+  } else {
+    const map = new Map();
+    txs
+      .filter((t) => t.date.startsWith(y))
+      .forEach((t) =>
+        t.items.forEach((it) => {
+          const cur = map.get(it.name) || { label: it.name, count: 0, qty: 0, sales: 0 };
+          cur.count += 1;
+          cur.qty += it.qty;
+          cur.sales += it.supply + it.tax;
+          map.set(it.name, cur);
+        })
+      );
+    const rows = [...map.values()].sort((a, b) => b.sales - a.sales);
+    table = reportTable(['품명', '건수', '수량', '매출'], rows, false, true);
+  }
+
+  $('#main').innerHTML = `
+    <section class="card">
+      <div class="section-head">
+        <select id="rpYear">${years.map((v) => `<option ${v === y ? 'selected' : ''}>${v}</option>`).join('')}</select>
+        <div class="auth-tabs report-tabs">
+          ${Object.entries(MODES).map(([k, l]) => `<button type="button" data-mode="${k}" class="${k === reportView.mode ? 'active' : ''}">${l}</button>`).join('')}
+        </div>
+        <button id="btnCsv">📄 엑셀(CSV) 내려받기</button>
+      </div>
+      <div class="table-wrap">${table}</div>
+      <p class="hint">${y}년 기준입니다. 표를 그대로 엑셀로 받아 세무사에게 전달할 수 있습니다.</p>
+    </section>`;
+
+  $('#rpYear').addEventListener('change', (e) => {
+    reportView.year = e.target.value;
+    renderReports();
+  });
+  $$('.report-tabs button').forEach((b) =>
+    b.addEventListener('click', () => {
+      reportView.mode = b.dataset.mode;
+      renderReports();
+    })
+  );
+  $('#btnCsv').addEventListener('click', () => downloadTableCsv(`${y}_${reportView.mode}`));
+}
+
+function reportTable(heads, rows, cumulative, isProduct) {
+  if (!rows.length) return '<p class="empty-cell">이 해에 기록된 내역이 없습니다.</p>';
+  const sum = rows.reduce(
+    (a, r) => ({ count: a.count + r.count, qty: a.qty + (r.qty || 0), sales: a.sales + r.sales, received: a.received + (r.received || 0) }),
+    { count: 0, qty: 0, sales: 0, received: 0 }
+  );
+  return `<table id="reportTable">
+    <thead><tr>${heads.map((h, i) => `<th class="${i ? 'num' : ''}">${h}</th>`).join('')}</tr></thead>
+    <tbody>
+      ${rows
+        .map(
+          (r) => `<tr>
+            <td><b>${esc(r.label)}</b></td>
+            <td class="num">${won(r.count)}</td>
+            ${isProduct ? `<td class="num">${won(r.qty)}</td>` : ''}
+            <td class="num ${r.sales < 0 ? 'neg' : ''}">${won(r.sales)}</td>
+            ${isProduct ? '' : `<td class="num">${won(r.received)}</td>`}
+            ${isProduct ? '' : `<td class="num ${r.balance > 0 ? 'warn' : r.balance < 0 ? 'neg' : ''}"><b>${won(r.balance)}</b></td>`}
+          </tr>`
+        )
+        .join('')}
+    </tbody>
+    <tfoot><tr>
+      <th>합계</th><th class="num">${won(sum.count)}</th>
+      ${isProduct ? `<th class="num">${won(sum.qty)}</th>` : ''}
+      <th class="num">${won(sum.sales)}</th>
+      ${isProduct ? '' : `<th class="num">${won(sum.received)}</th>`}
+      ${isProduct ? '' : `<th class="num">${cumulative ? '' : won(rows.reduce((a, r) => a + r.balance, 0))}</th>`}
+    </tr></tfoot>
+  </table>`;
+}
+
+// 화면의 표를 그대로 CSV로 저장 (엑셀에서 바로 열림)
+function downloadTableCsv(name) {
+  const table = $('#reportTable');
+  if (!table) return toast('내려받을 내용이 없습니다.');
+  const lines = [...table.querySelectorAll('tr')].map((tr) =>
+    [...tr.children]
+      .map((td) => {
+        const v = td.textContent.trim().replace(/,/g, '');
+        return /["\n]/.test(v) ? '"' + v.replace(/"/g, '""') + '"' : v;
+      })
+      .join(',')
+  );
+  const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8;' });
+  downloadBlob(blob, `거래장부_${name}.csv`);
+  toast('엑셀 파일을 내려받았습니다.');
+}
+
+function downloadBlob(blob, filename) {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a); // 일부 브라우저는 문서에 붙어 있어야 동작한다
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}
+
+// 거래·입금 내역을 그대로 엑셀(CSV)로 내려받는다 (지금 걸린 검색 조건 기준)
+function exportTransactionsCsv() {
+  const inRange = (d) => (!state.txFrom || d >= state.txFrom) && (!state.txTo || d <= state.txTo);
+  const q = state.txProductQuery.trim().toLowerCase();
+  const txRows = txCache
+    .filter((t) => inRange(t.date))
+    .filter((t) => !q || t.items.some((it) => it.name.toLowerCase().includes(q)))
+    .flatMap((t) =>
+      t.items.map((it) => [t.date, t.companyName, '거래', it.name, it.spec, it.qty, it.price, it.supply, it.tax, it.supply + it.tax, '', t.memo])
+    );
+  const payRows = (q ? [] : payCache.filter((x) => inRange(x.date))).map((x) => [
+    x.date, x.companyName, '입금', PAY_METHOD_LABEL[x.method] || '', '', '', '', '', '', '', x.amount, x.memo,
+  ]);
+  const rows = [...txRows, ...payRows].sort((a, b) => String(a[0]).localeCompare(String(b[0])));
+  if (!rows.length) return toast('내려받을 내역이 없습니다.');
+  const head = ['날짜', '상호', '구분', '품명', '규격', '수량', '단가', '공급가액', '세액', '합계', '입금', '메모'];
+  const csv = [head, ...rows]
+    .map((r) => r.map((v) => {
+      const t = String(v == null ? '' : v);
+      return /[",\n]/.test(t) ? '"' + t.replace(/"/g, '""') + '"' : t;
+    }).join(','))
+    .join('\n');
+  downloadBlob(new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' }), `거래장부_거래내역_${today()}.csv`);
+  toast(`${rows.length}줄을 엑셀 파일로 내려받았습니다.`);
 }
 
 /* ─────────────── 제품관리 ─────────────── */
@@ -452,7 +741,11 @@ function attachProductAutocomplete(input, getCompanyId, onPick) {
 
 /* ─────────────── 거래관리 (장부 시트) ─────────────── */
 let txCache = [];
-let checkedTxIds = new Set(); // 체크된 거래 id (새로고침 전까지 유지)
+let payCache = [];
+let checkedTxIds = new Set(); // 체크된 줄 (새로고침 전까지 유지, 't123'/'p45' 형태)
+
+const PAY_METHOD_LABEL = { cash: '현금', transfer: '계좌이체', card: '카드', note: '어음', etc: '기타' };
+const rowKey = (tr) => (tr.dataset.kind === 'pay' ? 'p' : 't') + tr.dataset.id;
 let sheetLastIdx = null;      // 마지막으로 체크한 행 위치 ('=' 연속 체크용)
 
 function setEasyMode(on) {
@@ -484,9 +777,11 @@ async function renderTransactions() {
         <select id="entryVat" class="vat-select" title="빠른 입력 부가세 방식">
           ${Object.entries(VAT_LABEL).map(([v, l]) => `<option value="${v}" ${v === state.entryVat ? 'selected' : ''}>${l}</option>`).join('')}
         </select>
+        <button id="btnAddPay" class="pay-btn">＋ 입금 받음</button>
         <button id="btnAddTx">＋ 여러 품목 거래</button>
         <button id="btnEasyOn" title="글씨를 크게 해서 하나씩 입력합니다">🔎 큰 글씨</button>
         <button type="button" id="btnPin" class="pin-btn">📌<span id="pinLabel" class="pin-label">커서 고정</span></button>
+        <button type="button" id="btnTxCsv">📄 엑셀</button>
       </div>
       <p class="summary"><span id="txSummary"></span><span id="selSummary" class="sel-summary"></span></p>
       <div class="table-wrap ledger-wrap">
@@ -591,6 +886,8 @@ async function renderTransactions() {
     recomputeEntry();
   });
   $('#btnAddTx').addEventListener('click', () => openTxForm(null));
+  $('#btnAddPay').addEventListener('click', () => openPaymentForm(null));
+  $('#btnTxCsv').addEventListener('click', exportTransactionsCsv);
   $('#btnEasyOn').addEventListener('click', () => setEasyMode(true));
   $('#eQty').addEventListener('input', () => {
     state.entryQtyTouched = true;
@@ -711,7 +1008,8 @@ async function renderTransactionsEasy() {
       </form>
     </section>
     <section class="card easy-card">
-      <h2 class="easy-recent-title">최근에 적은 거래</h2>
+      <button type="button" id="btnAddPayEasy" class="easy-pay-btn">💰 돈 받았어요 (입금)</button>
+      <h2 class="easy-recent-title">최근에 적은 것</h2>
       <div id="easyList"></div>
     </section>`;
 
@@ -786,6 +1084,7 @@ async function renderTransactionsEasy() {
     easyRecompute();
   });
   $('#btnEasyOff').addEventListener('click', () => setEasyMode(false));
+  $('#btnAddPayEasy').addEventListener('click', () => openPaymentForm(null));
   $('#btnPin').addEventListener('mousedown', (e) => e.preventDefault());
   $('#btnPin').addEventListener('click', () => togglePin(document.activeElement));
   $('#easyForm').addEventListener('submit', (e) => {
@@ -863,19 +1162,38 @@ async function saveEasyEntry() {
 }
 
 async function drawEasyList() {
-  txCache = await api('GET', '/api/transactions');
+  const [txs, pays] = await Promise.all([api('GET', '/api/transactions'), api('GET', '/api/payments')]);
+  txCache = txs;
+  payCache = pays;
   const box = $('#easyList');
   if (!box) return;
-  const rows = txCache.slice(0, 15); // 최신순 15건
+  // 거래와 입금을 최신순으로 섞어 15건
+  const rows = [
+    ...txCache.map((t) => Object.assign({ kind: 'tx' }, t)),
+    ...payCache.map((x) => Object.assign({ kind: 'pay' }, x)),
+  ]
+    .sort((a, b) => b.date.localeCompare(a.date) || b.id - a.id)
+    .slice(0, 15);
   if (!rows.length) {
     box.innerHTML = '<p class="empty-cell">아직 적은 거래가 없습니다.</p>';
     return;
   }
   box.innerHTML = rows
     .map((t) => {
+      if (t.kind === 'pay') {
+        return `<div class="easy-item easy-item-pay" data-id="${t.id}" data-kind="pay">
+          <div class="easy-item-head"><b>${esc(t.companyName)}</b><span>${esc(t.date)}</span></div>
+          <div class="easy-item-name">💰 입금 ${esc(PAY_METHOD_LABEL[t.method] || '')}${t.memo ? ' · ' + esc(t.memo) : ''}</div>
+          <div class="easy-item-foot">
+            <b>${won(t.amount)}원</b>
+            <button type="button" data-act="pay-edit">고치기</button>
+            <button type="button" data-act="pay-del" class="danger">삭제</button>
+          </div>
+        </div>`;
+      }
       const it = t.items[0];
       const more = t.items.length > 1 ? ` 외 ${t.items.length - 1}건` : '';
-      return `<div class="easy-item" data-id="${t.id}">
+      return `<div class="easy-item" data-id="${t.id}" data-kind="tx">
         <div class="easy-item-head"><b>${esc(t.companyName)}</b><span>${esc(t.date)}</span></div>
         <div class="easy-item-name">${esc(it.name)}${more}</div>
         <div class="easy-item-foot">
@@ -889,14 +1207,27 @@ async function drawEasyList() {
   box.onclick = async (e) => {
     const btn = e.target.closest('button[data-act]');
     if (!btn) return;
-    const id = Number(btn.closest('.easy-item').dataset.id);
+    const item = btn.closest('.easy-item');
+    const id = Number(item.dataset.id);
+    const act = btn.dataset.act;
+    if (act === 'pay-edit' || act === 'pay-del') {
+      const pay = payCache.find((x) => x.id === id);
+      if (!pay) return;
+      if (act === 'pay-edit') return openPaymentForm(pay);
+      if (!confirm(`${pay.date} '${pay.companyName}' 입금 ${won(pay.amount)}원을 지울까요?`)) return;
+      await api('DELETE', '/api/payments/' + id);
+      toast('지웠습니다.');
+      await refreshCompanies();
+      return drawEasyList();
+    }
     const t = txCache.find((x) => x.id === id);
     if (!t) return;
-    if (btn.dataset.act === 'sheet') openStatement(t);
-    else if (btn.dataset.act === 'del') {
+    if (act === 'sheet') openStatement(t);
+    else if (act === 'del') {
       if (!confirm(`${t.date} '${t.companyName}' 거래를 지울까요?`)) return;
       await api('DELETE', '/api/transactions/' + id);
       toast('지웠습니다.');
+      await refreshCompanies();
       drawEasyList();
     }
   };
@@ -1119,34 +1450,66 @@ async function saveEntry() {
 }
 
 async function drawTxRows() {
-  txCache = await api('GET', '/api/transactions' + (state.txCompanyId ? '?companyId=' + state.txCompanyId : ''));
+  const qs = state.txCompanyId ? '?companyId=' + state.txCompanyId : '';
+  const [txs, pays] = await Promise.all([
+    api('GET', '/api/transactions' + qs),
+    api('GET', '/api/payments' + qs),
+  ]);
+  txCache = txs;
+  payCache = pays;
   const tbody = $('#txRows');
   if (!tbody) return;
 
   // 날짜 범위·품명 검색 필터 (화면에서 걸러냄)
-  let list = txCache;
-  if (state.txFrom) list = list.filter((t) => t.date >= state.txFrom);
-  if (state.txTo) list = list.filter((t) => t.date <= state.txTo);
+  const inRange = (d) => (!state.txFrom || d >= state.txFrom) && (!state.txTo || d <= state.txTo);
   const q = state.txProductQuery.trim().toLowerCase();
+  let list = txCache.filter((t) => inRange(t.date));
   if (q) list = list.filter((t) => t.items.some((it) => it.name.toLowerCase().includes(q)));
+  // 품명으로 찾는 중에는 입금 줄을 숨긴다 (품명이 없는 줄이라 검색 대상이 아님)
+  const payList = q ? [] : payCache.filter((x) => inRange(x.date));
 
   const total = list.reduce((s, t) => s + t.total, 0);
-  const paid = list.reduce((s, t) => s + t.paid, 0);
-  $('#txSummary').textContent = `${list.length}건 · 합계 ${won(total)}원 · 입금 ${won(paid)}원 · 잔액 ${won(total - paid)}원`;
+  const paidInline = list.reduce((s, t) => s + t.paid, 0);
+  const received = payList.reduce((s, x) => s + x.amount, 0);
+  const paid = paidInline + received;
+  $('#txSummary').textContent =
+    `거래 ${list.length}건 · 합계 ${won(total)}원 · 받은 돈 ${won(paid)}원` +
+    (received ? ` (입금 ${payList.length}건 ${won(received)}원 포함)` : '') +
+    ` · 미수 ${won(total - paid)}원`;
   updateSelSummary();
 
-  const rows = [...list].sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id); // 옛날 → 최신
+  // 거래와 입금을 한 장부로 합쳐 옛날 → 최신 순으로 보여준다
+  const rows = [
+    ...list.map((t) => Object.assign({ kind: 'tx' }, t)),
+    ...payList.map((x) => Object.assign({ kind: 'pay' }, x)),
+  ].sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
+
   if (!rows.length) {
     tbody.innerHTML = `<tr><td colspan="13" class="empty-cell">${txCache.length ? '검색 조건에 맞는 거래가 없습니다.' : '아직 거래가 없습니다. 아래 파란 입력 행에서 첫 거래를 적어보세요.'}</td></tr>`;
     return;
   }
   tbody.innerHTML = rows
     .map((t, i) => {
+      if (t.kind === 'pay') {
+        const checked = checkedTxIds.has('p' + t.id);
+        return `<tr data-id="${t.id}" data-kind="pay" data-idx="${i}" class="row-pay ${checked ? 'row-checked' : ''}">
+          <td class="chk"><input type="checkbox" ${checked ? 'checked' : ''}></td>
+          <td>${esc(t.date)}</td>
+          <td><b>${esc(t.companyName)}</b></td>
+          <td colspan="6" class="pay-label">💰 입금 <span class="sub">${PAY_METHOD_LABEL[t.method] || ''}${t.memo ? ' · ' + esc(t.memo) : ''}</span></td>
+          <td class="num"><b>${won(t.amount)}</b></td>
+          <td class="num">—</td>
+          <td class="actions">
+            <button data-act="pay-edit" data-id="${t.id}">수정</button>
+            <button data-act="pay-del" data-id="${t.id}" class="danger" title="삭제">✕</button>
+          </td>
+        </tr>`;
+      }
       const single = t.items.length === 1;
       const it = t.items[0];
       const balance = t.total - t.paid;
-      const checked = checkedTxIds.has(t.id);
-      return `<tr data-id="${t.id}" data-idx="${i}" class="${checked ? 'row-checked' : ''}">
+      const checked = checkedTxIds.has('t' + t.id);
+      return `<tr data-id="${t.id}" data-kind="tx" data-idx="${i}" class="${checked ? 'row-checked' : ''}">
         <td class="chk"><input type="checkbox" ${checked ? 'checked' : ''}></td>
         <td>${esc(t.date)}</td>
         <td><b>${esc(t.companyName)}</b></td>
@@ -1171,14 +1534,29 @@ async function drawTxRows() {
     const btn = e.target.closest('button[data-act]');
     if (btn) {
       const id = Number(btn.dataset.id);
+      const act = btn.dataset.act;
+      if (act === 'pay-edit' || act === 'pay-del') {
+        const pay = payCache.find((x) => x.id === id);
+        if (!pay) return;
+        if (act === 'pay-edit') openPaymentForm(pay);
+        else {
+          if (!confirm(`${pay.date} '${pay.companyName}' 입금 ${won(pay.amount)}원을 삭제할까요?`)) return;
+          await api('DELETE', '/api/payments/' + id);
+          checkedTxIds.delete('p' + id);
+          toast('입금 내역을 삭제했습니다.');
+          await refreshCompanies();
+          drawTxRows();
+        }
+        return;
+      }
       const t = txCache.find((x) => x.id === id);
       if (!t) return;
-      if (btn.dataset.act === 'sheet') openStatement(t);
-      else if (btn.dataset.act === 'edit') openTxForm(t);
-      else if (btn.dataset.act === 'del') {
+      if (act === 'sheet') openStatement(t);
+      else if (act === 'edit') openTxForm(t);
+      else if (act === 'del') {
         if (!confirm(`${t.date} '${t.companyName}' 거래를 삭제할까요?`)) return;
         await api('DELETE', '/api/transactions/' + id);
-        checkedTxIds.delete(id);
+        checkedTxIds.delete('t' + id);
         toast('거래를 삭제했습니다.');
         drawTxRows();
       }
@@ -1190,7 +1568,7 @@ async function drawTxRows() {
     const cb = tr.querySelector('input[type="checkbox"]');
     if (!cb) return;
     if (e.target !== cb) cb.checked = !cb.checked;
-    const id = Number(tr.dataset.id);
+    const id = rowKey(tr);
     if (cb.checked) checkedTxIds.add(id);
     else checkedTxIds.delete(id);
     tr.classList.toggle('row-checked', cb.checked);
@@ -1205,14 +1583,16 @@ async function drawTxRows() {
 function updateSelSummary() {
   const el = $('#selSummary');
   if (!el) return;
-  const sel = txCache.filter((t) => checkedTxIds.has(t.id));
-  if (!sel.length) {
+  const sel = txCache.filter((t) => checkedTxIds.has('t' + t.id));
+  const selPay = payCache.filter((x) => checkedTxIds.has('p' + x.id));
+  const count = sel.length + selPay.length;
+  if (!count) {
     el.textContent = '';
     return;
   }
   const total = sel.reduce((s, t) => s + t.total, 0);
-  const paid = sel.reduce((s, t) => s + t.paid, 0);
-  el.textContent = ` · ☑ 선택 ${sel.length}건: 합계 ${won(total)}원 · 입금 ${won(paid)}원 · 잔액 ${won(total - paid)}원`;
+  const paid = sel.reduce((s, t) => s + t.paid, 0) + selPay.reduce((s, x) => s + x.amount, 0);
+  el.textContent = ` · ☑ 선택 ${count}건: 합계 ${won(total)}원 · 받은 돈 ${won(paid)}원 · 미수 ${won(total - paid)}원`;
 }
 
 // 고정된 머리글·입력 행에 가려지지 않게 스크롤한다 (다음 줄까지 한 줄 더 보이도록)
@@ -1258,7 +1638,7 @@ function checkNextRow() {
   const cb = next.querySelector('input[type="checkbox"]');
   if (cb && !cb.checked) {
     cb.checked = true;
-    checkedTxIds.add(Number(next.dataset.id));
+    checkedTxIds.add(rowKey(next));
     next.classList.add('row-checked');
   }
   scrollRowIntoView(next);
@@ -1289,7 +1669,7 @@ function undoCheckRow() {
   const cb = cur.querySelector('input[type="checkbox"]');
   if (cb && cb.checked) {
     cb.checked = false;
-    checkedTxIds.delete(Number(cur.dataset.id));
+    checkedTxIds.delete(rowKey(cur));
     cur.classList.remove('row-checked');
   }
   sheetLastIdx -= 1; // -1이 되면 '첫 행 이전' 상태 — 다음 '='는 첫 행부터 체크
@@ -1676,6 +2056,62 @@ async function openTxForm(tx) {
   else addRow(null);
 }
 
+/* ─────────────── 입금(수금) 입력 ─────────────── */
+async function openPaymentForm(pay) {
+  await refreshCompanies();
+  const company = pay ? state.companies.find((c) => c.id === pay.companyId) : null;
+  const preset = company || state.companies.find((c) => String(c.id) === String(state.entryCompanyId || state.txCompanyId));
+  openModal(`
+    <h2>${pay ? '입금 수정' : '입금 받음'}</h2>
+    <p class="hint">거래와 별개로 받은 돈을 적습니다. 미수금에서 자동으로 빠집니다.</p>
+    <form id="payForm">
+      <label>상호 *<input name="companyName" id="payCompany" required autocomplete="off" placeholder="상호 입력·검색" value="${esc(preset && preset.name)}"></label>
+      <div class="form-grid">
+        <label>날짜<input name="date" type="date" value="${esc(pay ? pay.date : today())}"></label>
+        <label>받은 금액 *<input name="amount" type="number" inputmode="numeric" required value="${pay ? pay.amount : ''}" placeholder="0"></label>
+      </div>
+      <div class="form-grid">
+        <label>받은 방법
+          <select name="method">
+            ${Object.entries(PAY_METHOD_LABEL).map(([v, l]) => `<option value="${v}" ${pay && pay.method === v ? 'selected' : ''}>${l}</option>`).join('')}
+          </select>
+        </label>
+        <label>메모<input name="memo" value="${esc(pay && pay.memo)}"></label>
+      </div>
+      <div class="form-actions">
+        <button type="button" data-close>취소</button>
+        <button type="submit" class="primary">저장</button>
+      </div>
+    </form>`);
+  $('[data-close]').addEventListener('click', closeModal);
+  attachSearchDropdown($('#payCompany'), {
+    minChars: 0,
+    enterPicksFirst: true,
+    getItems: async (q) => state.companies.filter((c) => !q || c.name.toLowerCase().includes(q)),
+    itemHtml: (c) => `<b>${esc(c.name)}</b><span class="ac-price">미수 ${won(c.outstanding)}원</span>`,
+    onPick: (c) => {
+      $('#payCompany').value = c.name;
+      $('#payForm').amount.focus();
+    },
+  });
+  $('#payForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = Object.fromEntries(new FormData(e.target));
+    body.amount = Number(body.amount) || 0;
+    try {
+      if (pay) await api('PUT', '/api/payments/' + pay.id, body);
+      else await api('POST', '/api/payments', body);
+      closeModal();
+      toast('입금 내역을 저장했습니다.');
+      await refreshCompanies();
+      if (state.easyMode) drawEasyList();
+      else drawTxRows();
+    } catch (err) {
+      alert(err.message);
+    }
+  });
+}
+
 /* ── 거래명세표 ── */
 function partyTable(title, info) {
   return `
@@ -1764,9 +2200,51 @@ function openStatement(tx) {
       }
     });
   });
+  statementCtx = { tx, company };
+  $('#btnShareSheet').classList.remove('hidden');
   document.body.classList.add('printing');
   $('#printOverlay').classList.remove('hidden');
 }
+
+// 거래명세표를 카톡·문자로 보내기 좋은 글로 만든다
+function statementText(tx, company) {
+  const s = state.settings;
+  const lines = [
+    `[거래명세서] ${tx.date}`,
+    `${company.name} 귀하`,
+    '',
+    ...tx.items.map((it) => `· ${it.name}${it.spec ? '(' + it.spec + ')' : ''} ${won(it.qty)}개 x ${won(it.price)}원 = ${won(it.supply + it.tax)}원`),
+    '',
+    `공급가액 ${won(tx.supplyTotal)}원 / 세액 ${won(tx.taxTotal)}원`,
+    `합계 ${won(tx.total)}원`,
+  ];
+  if (tx.paid) lines.push(`입금 ${won(tx.paid)}원 / 잔액 ${won(tx.total - tx.paid)}원`);
+  if (tx.memo) lines.push(`비고: ${tx.memo}`);
+  if (s.name) {
+    lines.push('', `${s.name}${s.owner ? ' ' + s.owner : ''}`);
+    if (s.phone) lines.push(s.phone);
+    if (s.bizNo) lines.push(`사업자 ${s.bizNo}`);
+  }
+  return lines.join('\n');
+}
+
+let statementCtx = null; // 지금 열려 있는 명세표
+
+$('#btnShareSheet').addEventListener('click', async () => {
+  if (!statementCtx) return;
+  const text = statementText(statementCtx.tx, statementCtx.company);
+  try {
+    if (navigator.share) {
+      await navigator.share({ title: '거래명세서', text });
+      return;
+    }
+    await navigator.clipboard.writeText(text);
+    toast('명세서 내용을 복사했습니다. 카톡에 붙여넣으세요.');
+  } catch (e) {
+    if (e && e.name === 'AbortError') return; // 사용자가 공유를 취소함
+    prompt('아래 내용을 복사해 보내세요.', text);
+  }
+});
 
 $('#btnDoPrint').addEventListener('click', () => window.print());
 $('#btnClosePrint').addEventListener('click', () => {
@@ -2171,7 +2649,7 @@ $('#btnLogout').addEventListener('click', async () => {
     .then((v) => { $('#verFooter').textContent = `거래장부 v${v.version} · ${v.commit}`; })
     .catch(() => {});
   const hash = location.hash.slice(1);
-  if (['companies', 'products', 'transactions', 'settings', 'admin'].includes(hash)) {
+  if (['companies', 'products', 'transactions', 'reports', 'settings', 'admin'].includes(hash)) {
     state.tab = hash;
     $$('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === hash));
   }
