@@ -251,6 +251,14 @@ form label input, form label select { margin-top: 0.2rem; font-weight: 400; }
   body:has(#saveBar:not(.hidden)) .fab-help { display: none; }
 }
 
+/* 거래처원장 */
+.ledger-doc { width: 100%; }
+.ledger-doc tbody tr.row-pay td { background: #f0fdf4; }
+.ledger-doc .carry-row td { background: #f8fafc; font-weight: 700; }
+.ledger-doc td, .ledger-doc th { white-space: nowrap; }
+.ledger-doc td:nth-child(2) { white-space: normal; }
+#ledgerSheet .sheet { padding: 1rem; border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; }
+
 /* 입금(수금) 줄 */
 .pay-btn { color: #15803d; border-color: #86efac; font-weight: 700; }
 .pay-btn:hover { background: #f0fdf4; }

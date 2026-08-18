@@ -109,6 +109,7 @@ function render() {
   if (state.tab === 'companies') renderCompanies();
   else if (state.tab === 'products') renderProducts();
   else if (state.tab === 'transactions') renderTransactions();
+  else if (state.tab === 'ledger') renderCompanyLedger();
   else if (state.tab === 'admin') renderAdmin();
   else renderSettings();
 }
@@ -168,6 +169,7 @@ function drawCompanyRows() {
         <td class="num">${won(c.txCount)}건</td>
         <td class="num ${c.outstanding > 0 ? 'warn' : c.outstanding < 0 ? 'neg' : ''}">${won(c.outstanding)}원</td>
         <td class="actions">
+          <button data-act="ledger" data-id="${c.id}" class="primary">원장</button>
           <button data-act="tx" data-id="${c.id}">거래보기</button>
           <button data-act="edit" data-id="${c.id}">수정</button>
           <button data-act="del" data-id="${c.id}" class="danger">삭제</button>
@@ -182,6 +184,7 @@ function drawCompanyRows() {
     const c = state.companies.find((x) => x.id === id);
     if (!c) return;
     if (btn.dataset.act === 'edit') openCompanyForm(c);
+    else if (btn.dataset.act === 'ledger') openCompanyLedger(c.id);
     else if (btn.dataset.act === 'tx') {
       state.txCompanyId = String(id);
       $(`#tabs button[data-tab="transactions"]`).click();
@@ -223,6 +226,119 @@ function openCompanyForm(c) {
       alert(err.message);
     }
   });
+}
+
+/* ─────────────── 거래처원장 ─────────────── */
+// 한 상호의 거래·입금을 날짜순으로 늘어놓고 누적 잔액(미수금)을 보여준다.
+const ledgerView = { companyId: null, from: '', to: '' };
+
+function openCompanyLedger(companyId) {
+  ledgerView.companyId = companyId;
+  state.tab = 'ledger';
+  $$('#tabs button').forEach((b) => b.classList.remove('active'));
+  render();
+}
+
+async function renderCompanyLedger() {
+  const c = state.companies.find((x) => x.id === ledgerView.companyId);
+  if (!c) {
+    state.tab = 'companies';
+    return render();
+  }
+  const [txs, pays] = await Promise.all([
+    api('GET', '/api/transactions?companyId=' + c.id),
+    api('GET', '/api/payments?companyId=' + c.id),
+  ]);
+
+  const inRange = (d) => (!ledgerView.from || d >= ledgerView.from) && (!ledgerView.to || d <= ledgerView.to);
+  const all = [
+    ...txs.map((t) => ({ kind: 'tx', date: t.date, id: t.id, label: itemLabel(t), amount: t.total, paid: t.paid, tx: t })),
+    ...pays.map((x) => ({ kind: 'pay', date: x.date, id: x.id, label: '💰 입금 ' + (PAY_METHOD_LABEL[x.method] || '') + (x.memo ? ' · ' + x.memo : ''), amount: 0, paid: x.amount })),
+  ].sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
+
+  // 기간 시작 전까지의 잔액을 '이월'로 먼저 깐다
+  const before = all.filter((r) => !inRange(r.date) && (!ledgerView.from || r.date < ledgerView.from));
+  const carry = before.reduce((s, r) => s + r.amount - r.paid, 0);
+  const rows = all.filter((r) => inRange(r.date));
+
+  let bal = carry;
+  const body = rows
+    .map((r) => {
+      bal += r.amount - r.paid;
+      return `<tr class="${r.kind === 'pay' ? 'row-pay' : ''}">
+        <td>${esc(r.date)}</td>
+        <td>${esc(r.label)}</td>
+        <td class="num ${r.amount < 0 ? 'neg' : ''}">${r.amount ? won(r.amount) : ''}</td>
+        <td class="num">${r.paid ? won(r.paid) : ''}</td>
+        <td class="num ${bal > 0 ? 'warn' : bal < 0 ? 'neg' : ''}"><b>${won(bal)}</b></td>
+      </tr>`;
+    })
+    .join('');
+
+  const sales = rows.reduce((s, r) => s + r.amount, 0);
+  const received = rows.reduce((s, r) => s + r.paid, 0);
+
+  $('#main').innerHTML = `
+    <section class="card">
+      <div class="section-head">
+        <button id="btnLedgerBack">← 상호 목록</button>
+        <input type="date" id="lgFrom" class="date-filter" value="${esc(ledgerView.from)}" title="시작일">
+        <span class="range-sep">~</span>
+        <input type="date" id="lgTo" class="date-filter" value="${esc(ledgerView.to)}" title="종료일">
+        <button id="btnLgClear">전체 기간</button>
+        <button id="btnLgPay" class="pay-btn">＋ 입금 받음</button>
+        <button id="btnLgPrint" class="primary">🖨 원장 인쇄</button>
+      </div>
+      <div id="ledgerSheet">
+        <div class="sheet">
+          <h2 class="sheet-title">거 래 처 원 장</h2>
+          <p class="sheet-date">${esc(c.name)}${c.owner ? ' (' + esc(c.owner) + ')' : ''} · 기간: ${esc(ledgerView.from || '처음')} ~ ${esc(ledgerView.to || '오늘')}</p>
+          <table class="sheet-items ledger-doc">
+            <thead><tr><th>날짜</th><th>내용</th><th class="num">매출</th><th class="num">입금</th><th class="num">잔액(미수)</th></tr></thead>
+            <tbody>
+              ${carry ? `<tr class="carry-row"><td>이월</td><td>이전 기간 미수금</td><td class="num"></td><td class="num"></td><td class="num"><b>${won(carry)}</b></td></tr>` : ''}
+              ${body || `<tr><td colspan="5" class="empty-cell">이 기간에 거래·입금 내역이 없습니다.</td></tr>`}
+            </tbody>
+            <tfoot>
+              <tr><th>합계</th><th></th><th class="num">${won(sales)}</th><th class="num">${won(received)}</th><th class="num"><b>${won(bal)}</b></th></tr>
+            </tfoot>
+          </table>
+          <p class="sheet-memo">현재 미수금 <b>${won(bal)}원</b>${ledgerView.from || ledgerView.to ? ' (표시 기간 기준)' : ''}</p>
+        </div>
+      </div>
+    </section>`;
+
+  $('#btnLedgerBack').addEventListener('click', () => {
+    const btn = $('#tabs button[data-tab="companies"]');
+    if (btn) btn.click();
+  });
+  $('#lgFrom').addEventListener('change', (e) => {
+    ledgerView.from = e.target.value;
+    renderCompanyLedger();
+  });
+  $('#lgTo').addEventListener('change', (e) => {
+    ledgerView.to = e.target.value;
+    renderCompanyLedger();
+  });
+  $('#btnLgClear').addEventListener('click', () => {
+    ledgerView.from = '';
+    ledgerView.to = '';
+    renderCompanyLedger();
+  });
+  $('#btnLgPay').addEventListener('click', () => {
+    state.entryCompanyId = String(c.id);
+    openPaymentForm(null);
+  });
+  $('#btnLgPrint').addEventListener('click', () => {
+    $('#printSheet').innerHTML = $('#ledgerSheet').innerHTML;
+    document.body.classList.add('printing');
+    $('#printOverlay').classList.remove('hidden');
+  });
+}
+
+function itemLabel(t) {
+  const it = t.items[0];
+  return it.name + (t.items.length > 1 ? ` 외 ${t.items.length - 1}건` : '') + (it.spec ? ` (${it.spec})` : '');
 }
 
 /* ─────────────── 제품관리 ─────────────── */
