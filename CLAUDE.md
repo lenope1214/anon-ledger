@@ -10,6 +10,10 @@ UI 문구, 커밋 메시지, 문서는 모두 한국어를 사용한다.
 - `staging` — develop과 production 사이 중간 검증이 필요할 때만 사용
 - 흐름: `feat/*` → `develop` → (`staging` →) `production`
 - 작업이 끝나면 **PR 없이** 위 순서대로 직접 머지하고 푸시한다.
+- **기본값: develop과 production에 동시에 반영한다** (2026-08-19 사용자 지시).
+  작업 완료 → `feat/*` → `develop` → `production`까지 한 번에 머지·푸시하고,
+  "운영 반영해줘"라는 별도 요청을 기다리지 않는다.
+  사용자가 "운영에 바로 적용하지 마라"고 말하면 그때부터 develop에만 올린다.
 - 기능이 develop에 머지될 때마다 package.json의 version을 올린다 —
   화면 하단 버전 표시(/api/version)로 배포 확인에 쓰인다.
 - `main` 브랜치는 삭제되었다. 다시 만들거나 푸시하지 말 것
