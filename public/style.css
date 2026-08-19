@@ -767,6 +767,18 @@ body.easy .fab, body.easy .fab-help { display: none; }
   body.printing .party-input { border: none; background: none; }
 }
 
+/* 빈 줄 상한에 닿았을 때 맨 아래에 보이는 안내 줄 */
+.grid-table tr.grid-end td {
+  text-align: center;
+  color: var(--sub);
+  font-size: 0.8rem;
+  padding: 0.6rem 0.5rem;
+  background: #fafbfd;
+  /* 좁은 화면에서는 두 줄로 접히게 (한 줄로 두면 표 전체가 넓어진다) */
+  white-space: normal;
+  flex: 1 1 100%;
+}
+
 /* ─────────────── 휴대폰 전용 장부 레이아웃 ─────────────── */
 /* 검색조건·도구 접기 버튼 — 좁은 화면에서만 보인다 */
 .tools-toggle { display: none; }

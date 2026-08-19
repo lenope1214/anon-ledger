@@ -860,7 +860,7 @@ async function renderTransactions() {
   // 아래로 내리면 빈 줄을 계속 만들어 준다 (엑셀처럼 끝없이 이어짐)
   $('.ledger-wrap').addEventListener('scroll', (e) => {
     const el = e.target;
-    if (el.scrollTop + el.clientHeight > el.scrollHeight - 120) addBlankRows(10);
+    if (el.scrollTop + el.clientHeight > el.scrollHeight - 120) addBlankRows(BLANK_STEP);
   });
 
   updatePinUI();
@@ -1386,7 +1386,9 @@ function applyEntryCompany(c) {
 /* ─────────────── 엑셀식 셀 입력 그리드 ─────────────── */
 const GRID_COLS = ['date', 'company', 'name', 'spec', 'qty', 'price', 'paid'];
 const COL_INDEX = { date: 1, company: 2, name: 3, spec: 4, qty: 5, price: 6, supply: 7, total: 8, tax: 9, paid: 10, balance: 11 };
-const BLANK_ROWS = 20;
+const BLANK_ROWS = 20;              // 처음부터 깔아 두는 빈 줄
+const BLANK_STEP = 10;              // 아래로 내릴 때마다 더 만드는 빈 줄
+const MAX_BLANK_ROWS = 100;         // 빈 줄은 여기까지만 (끝없이 늘어나 느려지지 않게)
 
 let gridRows = [];                  // 화면에 보이는 줄 (거래·입금·빈 줄)
 let gridEdit = null;                // { r, field, input }
@@ -1470,15 +1472,40 @@ function paintRow(i) {
   if (tr) tr.outerHTML = rowHtml(gridRows[i], i);
 }
 
+const blankCount = () => gridRows.reduce((s, r) => s + (r.kind === 'new' ? 1 : 0), 0);
+
+// 빈 줄을 아래에 더 만든다 (MAX_BLANK_ROWS 까지만) — 실제로 만든 줄 수를 돌려준다
 function addBlankRows(n) {
   const tbody = $('#txRows');
-  if (!tbody) return;
-  let html = '';
-  for (let k = 0; k < n; k++) {
-    gridRows.push(blankRow());
-    html += rowHtml(gridRows[gridRows.length - 1], gridRows.length - 1);
+  if (!tbody) return 0;
+  const add = Math.min(n, Math.max(0, MAX_BLANK_ROWS - blankCount()));
+  if (add) {
+    let html = '';
+    for (let k = 0; k < add; k++) {
+      gridRows.push(blankRow());
+      html += rowHtml(gridRows[gridRows.length - 1], gridRows.length - 1);
+    }
+    tbody.insertAdjacentHTML('beforeend', html);
   }
-  tbody.insertAdjacentHTML('beforeend', html);
+  syncGridEndRow();
+  return add;
+}
+
+// 빈 줄이 상한에 닿으면 맨 아래에 '여기까지' 줄을 보여준다 (엑셀의 시트 끝처럼)
+function syncGridEndRow() {
+  const tbody = $('#txRows');
+  if (!tbody) return;
+  const end = tbody.querySelector('tr.grid-end');
+  if (blankCount() >= MAX_BLANK_ROWS) {
+    if (!end) {
+      tbody.insertAdjacentHTML(
+        'beforeend',
+        `<tr class="grid-end"><td colspan="13">빈 줄은 ${MAX_BLANK_ROWS}개까지 만듭니다 · 적은 줄을 저장하면 빈 줄이 다시 생깁니다</td></tr>`
+      );
+    }
+  } else if (end) {
+    end.remove();
+  }
 }
 
 async function drawTxRows() {
@@ -1513,6 +1540,7 @@ async function drawTxRows() {
   for (let k = 0; k < BLANK_ROWS; k++) gridRows.push(blankRow());
 
   tbody.innerHTML = gridRows.map((r, i) => rowHtml(r, i)).join('');
+  syncGridEndRow();
   updateSelSummary();
   bindGridEvents(tbody);
   // 새로 적을 수 있는 첫 빈 줄이 보이도록
@@ -1707,6 +1735,7 @@ async function saveNewRowIfReady(r) {
     state.entryDate = tx.date;
     gridRows[r] = rowFromTx(Object.assign({ companyName: c ? c.name : row.companyName }, tx));
     paintRow(r);
+    syncGridEndRow(); // 빈 줄 하나가 거래로 바뀌었으니 '여기까지' 줄을 다시 계산
     updateSummaryOnly();
     toast('저장했습니다.');
     return true;
@@ -1785,7 +1814,7 @@ async function moveCell(dr, dfield) {
 
 // 다음 줄을 적기 시작한다 (커서 고정 칸이 있으면 그 칸부터)
 function startRowEdit(r) {
-  if (r >= gridRows.length - 3) addBlankRows(10);
+  if (r >= gridRows.length - 3) addBlankRows(BLANK_STEP);
   const row = gridRows[r];
   if (!row) return;
   const pinned = state.pinnedField && state.pinnedField.startsWith('g-') ? state.pinnedField.slice(2) : '';
@@ -1821,6 +1850,11 @@ function onCellKey(e) {
     e.preventDefault();
     const v = Number(input.value) || 0;
     if (v !== 0) input.value = -v;
+  } else if (e.key === 'Escape' && (field === 'company' || field === 'name')) {
+    // 한 번의 ESC로 바로 검색 — 한글을 조합하는 중이어도 적은 글자를 그대로 가져간다
+    e.preventDefault();
+    e.stopPropagation();
+    openContextSearch();
   }
 }
 
@@ -2050,7 +2084,10 @@ const COMPANY_FIELDS = [
 function ssRender() {
   const box = $('#ssResults');
   if (!ss.items.length) {
-    box.innerHTML = '<p class="empty-cell">검색 결과가 없습니다.</p>';
+    const q = $('#ssInput').value.trim();
+    box.innerHTML = q
+      ? `<p class="empty-cell">'${esc(q)}' 검색 결과가 없습니다 · <b>Enter</b>를 누르면 적은 그대로 칸에 넣습니다 (저장할 때 새로 등록)</p>`
+      : '<p class="empty-cell">검색 결과가 없습니다.</p>';
     return;
   }
   if (ss.tab === 'company') {
@@ -2138,6 +2175,38 @@ async function saveCompanyField(inp) {
   }
 }
 
+// 검색 결과가 없을 때 Enter: 적은 글자를 그대로 칸에 넣는다 (저장할 때 자동 등록)
+function ssApplyText() {
+  const text = $('#ssInput').value.trim();
+  if (!text) return closeSearchSheet();
+  if (!state.easyMode && gridEdit) {
+    const r = gridEdit.r;
+    const row = gridRows[r];
+    gridSearching = false;
+    gridEdit = null; // 편집 중이던 값 대신 검색창에 적은 값을 쓴다
+    closeSearchSheet();
+    if (ss.tab === 'company') {
+      row.companyName = text;
+      row.companyId = 0; // 저장할 때 이 이름으로 자동 등록된다
+      paintRow(r);
+      if (row.kind === 'tx' || row.kind === 'pay') saveExistingRow(row, r);
+      return openCellEditor(r, editableFields(row).includes('name') ? 'name' : 'date');
+    }
+    row.name = text;
+    paintRow(r);
+    if (row.kind === 'tx') saveExistingRow(row, r);
+    return openCellEditor(r, 'spec');
+  }
+  // 큰 글씨 모드: 해당 입력칸에 그대로 넣는다
+  const el = ss.tab === 'company' ? $('#xCompany') : $('#xName');
+  closeSearchSheet();
+  if (el) {
+    el.value = text;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.focus();
+  }
+}
+
 function ssPick(i) {
   const it = ss.items[i];
   if (!it) return;
@@ -2212,7 +2281,8 @@ $('#ssInput').addEventListener('keydown', (e) => {
     ssRender();
   } else if (e.key === 'Enter') {
     e.preventDefault();
-    ssPick(ss.sel);
+    if (ss.items.length) ssPick(ss.sel);
+    else ssApplyText(); // 결과가 없으면 적은 글자를 그대로 칸에 넣는다
   }
 });
 
