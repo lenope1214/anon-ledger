@@ -1509,7 +1509,7 @@ function bindGridEvents(tbody) {
       updateSelSummary();
       return;
     }
-    if (td.dataset.edit) openCellEditor(i, td.dataset.f);
+    if (td.dataset.edit) await openCellEditor(i, td.dataset.f);
   };
 }
 
@@ -1539,11 +1539,13 @@ async function handleRowAction(btn) {
 }
 
 /* ── 셀 편집기 ── */
-function openCellEditor(r, field) {
+async function openCellEditor(r, field) {
   const row = gridRows[r];
   if (!row) return;
-  if (gridEdit && (gridEdit.r !== r || gridEdit.field !== field)) closeCellEditor();
-  if (gridEdit) return;
+  if (gridEdit) {
+    if (gridEdit.r === r && gridEdit.field === field) return; // 같은 칸이면 그대로
+    await commitCell(gridEdit.r !== r); // 적던 값을 먼저 반영한다
+  }
 
   const td = $(`#txRows tr[data-r="${r}"] td[data-f="${field}"]`);
   if (!td) return;
