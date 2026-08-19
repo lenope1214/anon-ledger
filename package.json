@@ -1,6 +1,6 @@
 {
   "name": "anon-ledger",
-  "version": "1.14.0",
+  "version": "1.14.1",
   "private": true,
   "description": "컴장부를 대체하는 한국어 거래 장부 웹앱",
   "scripts": {

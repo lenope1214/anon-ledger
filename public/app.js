@@ -763,8 +763,9 @@ async function renderTransactions() {
   await refreshCompanies();
   const main = $('#main');
   main.innerHTML = `
-    <section class="card">
-      <div class="section-head">
+    <section class="card" id="txCard">
+      <button type="button" id="btnToolsToggle" class="tools-toggle">🔧 검색조건·도구 열기</button>
+      <div class="section-head tx-head">
         <select id="txCompany">
           <option value="">전체 상호</option>
           ${state.companies.map((c) => `<option value="${c.id}" ${String(c.id) === state.txCompanyId ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}
@@ -801,6 +802,13 @@ async function renderTransactions() {
       <button type="button" class="fab" id="btnQuickSearch" title="빠른 검색 (ESC)">🔍 검색</button>
       <button type="button" class="fab fab-help" id="btnHelp" title="사용법 안내">?</button>
     </section>`;
+
+  $('#btnToolsToggle').addEventListener('click', () => {
+    const card = $('#txCard');
+    const open = card.classList.toggle('tools-open');
+    $('#btnToolsToggle').textContent = open ? '🔧 검색조건·도구 닫기' : '🔧 검색조건·도구 열기';
+    fitLedgerHeight();
+  });
 
   $('#txCompany').addEventListener('change', (e) => {
     state.txCompanyId = e.target.value;
@@ -857,8 +865,29 @@ async function renderTransactions() {
 
   updatePinUI();
   await drawTxRows();
+  fitLedgerHeight();
   maybeAutoTour(); // 처음 온 사용자에게 사용법 안내
 }
+
+// 휴대폰에서는 장부가 화면 아래까지 꽉 차게 만든다
+// (페이지와 장부가 따로 스크롤되면 헷갈리므로 스크롤을 장부 하나로 모은다)
+function fitLedgerHeight() {
+  const wrap = $('.ledger-wrap');
+  if (!wrap) return;
+  if (!window.matchMedia('(max-width: 700px)').matches) {
+    wrap.style.maxHeight = '';
+    return;
+  }
+  const rect = wrap.getBoundingClientRect();
+  const top = rect.top + window.scrollY;
+  // 장부 아래에 있는 것(안내 문구·카드 여백·버전 표시)만큼을 남긴다
+  const below = Math.max(0, document.body.scrollHeight - (rect.bottom + window.scrollY));
+  wrap.style.maxHeight = Math.max(240, Math.round(window.innerHeight - top - below)) + 'px';
+}
+
+window.addEventListener('resize', () => {
+  if (state.tab === 'transactions') fitLedgerHeight();
+});
 function maybeAutoTour() {
   if (state.easyMode) return; // 큰 글씨 모드에는 안내 대상 요소가 없다
   let done = true;
@@ -2739,8 +2768,9 @@ function renderBlocked(st) {
 const TOUR_STEPS = [
   {
     sel: '.ledger-table thead',
+    alt: '.ledger-wrap',
     title: '여기가 장부입니다',
-    body: '거래 내역이 옛날→최신 순으로 쌓입니다. 머리글은 항상 위에 고정되어 있어 아래로 내려도 어떤 칸인지 보입니다.',
+    body: '거래 내역이 옛날→최신 순으로 쌓입니다. 컴퓨터에서는 머리글이 위에 고정되고, 휴대폰에서는 한 거래가 두세 줄 카드처럼 접혀서 보입니다.',
     pos: 'bottom',
   },
   {
@@ -2807,7 +2837,12 @@ const TOUR_STEPS = [
   },
 ];
 
-const tour = { steps: [], i: 0 };
+const tour = { steps: [], i: 0, toolsOpened: false };
+
+// 화면 폭에 따라 감춰진 요소가 있으면 대체 요소를 비춘다
+function tourStepEl(step) {
+  return tourVisible(step.sel) || (step.alt ? tourVisible(step.alt) : null);
+}
 
 function tourVisible(sel) {
   const el = $(sel);
@@ -2827,8 +2862,15 @@ function startTour() {
     setTimeout(startTour, 350); // 탭이 그려진 뒤 시작
     return;
   }
+  // 휴대폰에서는 접혀 있는 검색조건·도구를 펴 두고 안내한다 (끝나면 원래대로)
+  const toolsBtn = $('#btnToolsToggle');
+  tour.toolsOpened = false;
+  if (toolsBtn && tourVisible('#btnToolsToggle') && !$('#txCard').classList.contains('tools-open')) {
+    toolsBtn.click();
+    tour.toolsOpened = true;
+  }
   // 화면에 실제로 있는 단계만 사용 (거래가 없으면 행 관련 단계는 건너뜀)
-  tour.steps = TOUR_STEPS.filter((s) => !s.optional || tourVisible(s.sel));
+  tour.steps = TOUR_STEPS.filter((s) => !s.optional || tourStepEl(s));
   tour.i = 0;
   $('#tourOverlay').classList.remove('hidden');
   showTourStep();
@@ -2836,6 +2878,11 @@ function startTour() {
 
 function endTour() {
   $('#tourOverlay').classList.add('hidden');
+  if (tour.toolsOpened) { // 안내하려고 펴 둔 도구 줄은 다시 접는다
+    const btn = $('#btnToolsToggle');
+    if (btn && $('#txCard') && $('#txCard').classList.contains('tools-open')) btn.click();
+    tour.toolsOpened = false;
+  }
   try {
     localStorage.setItem('tourDone', '1');
   } catch (e) { /* 무시 */ }
@@ -2844,7 +2891,7 @@ function endTour() {
 function showTourStep() {
   const step = tour.steps[tour.i];
   if (!step) return endTour();
-  const el = tourVisible(step.sel);
+  const el = tourStepEl(step);
   if (!el) { // 못 찾으면 다음 단계로
     tour.i += 1;
     return showTourStep();
