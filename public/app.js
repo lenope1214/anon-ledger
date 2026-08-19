@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.15.3'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.15.4'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -1975,7 +1975,7 @@ document.addEventListener('keydown', (e) => {
 });
 
 /* ─────────────── 빠른 검색 시트 (ESC / 🔍) ─────────────── */
-const ss = { tab: 'company', items: [], sel: 0 };
+const ss = { tab: 'company', items: [], sel: 0, companyId: 0, companyName: '' };
 
 async function getAllProducts() {
   if (!state.productsCache.all) {
@@ -1988,9 +1988,11 @@ function searchSheetOpen() {
   return !$('#searchSheet').classList.contains('hidden');
 }
 
-function openSearchSheet(tab, query) {
+function openSearchSheet(tab, query, company) {
   $('#searchSheet').classList.remove('hidden');
   document.body.classList.add('sheet-open'); // 본문을 패널 높이만큼 위로 밀어 올림
+  ss.companyId = (company && company.id) || 0;   // 상호가 정해져 있으면 그 상호 제품만
+  ss.companyName = (company && company.name) || '';
   if (tab) ssSetTabOnly(tab);
   $('#ssInput').value = query || '';
   ssUpdate();
@@ -1999,20 +2001,45 @@ function openSearchSheet(tab, query) {
   scrollSheetToBottom(); // 입력 행이 패널 위에 계속 보이도록
 }
 
+// 적어 둔 상호명으로 상호를 찾는다 (아직 저장 전이라 id가 없을 수 있다)
+function companyByName(name) {
+  const n = (name || '').trim().toLowerCase();
+  if (!n) return null;
+  return state.companies.find((c) => c.name.toLowerCase() === n) || null;
+}
+
+// 품명을 찾을 때 기준이 되는 상호 — 그 줄에 적힌 상호(없으면 전체)
+function contextCompany() {
+  if (!state.easyMode && gridEdit) {
+    const row = gridRows[gridEdit.r];
+    if (row) {
+      const byId = state.companies.find((c) => c.id === Number(row.companyId));
+      return byId || companyByName(row.companyName);
+    }
+  }
+  const x = $('#xCompany');
+  if (x) return companyByName(x.value);
+  return state.companies.find((c) => String(c.id) === String(state.entryCompanyId)) || null;
+}
+
 // 커서가 있던 칸에 맞춰 검색 대상과 검색어를 정한다
 function openContextSearch() {
   if (gridEdit) {
     const value = gridEdit.input.value.trim();
-    if (gridEdit.field === 'company' || gridEdit.field === 'name') {
+    if (gridEdit.field === 'company') {
       gridSearching = true;
-      return openSearchSheet(gridEdit.field === 'company' ? 'company' : 'product', value);
+      return openSearchSheet('company', value);
+    }
+    if (gridEdit.field === 'name') {
+      gridSearching = true;
+      return openSearchSheet('product', value, contextCompany());
     }
   }
   const el = document.activeElement;
   const id = el && el.id;
   const value = el && typeof el.value === 'string' ? el.value.trim() : '';
   if (id === 'xCompany') return openSearchSheet('company', value);
-  if (id === 'xName') return openSearchSheet('product', value);
+  if (id === 'xName') return openSearchSheet('product', value, contextCompany());
   openSearchSheet(null, '');
 }
 
@@ -2036,7 +2063,10 @@ function ssSetTabOnly(tab) {
   ss.tab = tab;
   $('#ssTabCompany').classList.toggle('active', tab === 'company');
   $('#ssTabProduct').classList.toggle('active', tab === 'product');
-  $('#ssInput').placeholder = tab === 'company' ? '상호명·대표자 검색 (아래에서 바로 수정 가능)' : '품명·규격 검색 (전체 상호)';
+  $('#ssInput').placeholder =
+    tab === 'company'
+      ? '상호명·대표자 검색 (아래에서 바로 수정 가능)'
+      : `품명·규격 검색 (${ss.companyId ? esc(ss.companyName) : '전체 상호'})`;
 }
 
 function ssSetTab(tab) {
@@ -2071,6 +2101,7 @@ async function ssUpdate() {
     ss.items = sortByPrefix(
       all
         .filter((p) => names.has(p.companyId))
+        .filter((p) => !ss.companyId || p.companyId === ss.companyId) // 상호가 정해졌으면 그 상호 제품만
         .filter((p) => !q || p.name.toLowerCase().includes(q) || (p.spec || '').toLowerCase().includes(q))
         .map((p) => Object.assign({}, p, { companyName: names.get(p.companyId) })),
       q
@@ -2078,6 +2109,19 @@ async function ssUpdate() {
   }
   ss.sel = 0;
   ssRender();
+}
+
+function bindSsScopeBar() {
+  const btn = $('#ssAllCompanies');
+  if (!btn) return;
+  btn.addEventListener('mousedown', (e) => e.preventDefault()); // 입력칸 포커스 유지
+  btn.addEventListener('click', () => {
+    ss.companyId = 0;
+    ss.companyName = '';
+    ssSetTabOnly('product');
+    ssUpdate();
+    $('#ssInput').focus();
+  });
 }
 
 const COMPANY_FIELDS = [
@@ -2088,13 +2132,23 @@ const COMPANY_FIELDS = [
   { f: 'address', label: '주소', cls: 'w-addr' },
 ];
 
+// 상호로 좁혀 보는 중이면 그 사실과 [전체 상호에서 찾기] 버튼을 보여준다
+function ssScopeBar() {
+  if (ss.tab !== 'product' || !ss.companyId) return '';
+  return `<p class="ss-scope"><b>${esc(ss.companyName)}</b>의 제품만 보는 중
+    <button type="button" id="ssAllCompanies" class="link-btn">전체 상호에서 찾기</button></p>`;
+}
+
 function ssRender() {
   const box = $('#ssResults');
   if (!ss.items.length) {
     const q = $('#ssInput').value.trim();
-    box.innerHTML = q
-      ? `<p class="empty-cell">'${esc(q)}' 검색 결과가 없습니다 · <b>Enter</b>를 누르면 적은 그대로 칸에 넣습니다 (저장할 때 새로 등록)</p>`
-      : '<p class="empty-cell">검색 결과가 없습니다.</p>';
+    box.innerHTML =
+      ssScopeBar() +
+      (q
+        ? `<p class="empty-cell">'${esc(q)}' 검색 결과가 없습니다 · <b>Enter</b>를 누르면 적은 그대로 칸에 넣습니다 (저장할 때 새로 등록)</p>`
+        : '<p class="empty-cell">검색 결과가 없습니다.</p>');
+    bindSsScopeBar();
     return;
   }
   if (ss.tab === 'company') {
@@ -2137,6 +2191,8 @@ function ssRender() {
       )
       .join('');
   }
+  if (ss.tab === 'product') box.insertAdjacentHTML('afterbegin', ssScopeBar());
+  bindSsScopeBar();
   const selEl = box.querySelector('.ss-item.sel, .ss-row.sel');
   if (selEl) selEl.scrollIntoView({ block: 'nearest' });
   box.querySelectorAll('.ss-item, .ss-row').forEach((el) => {
