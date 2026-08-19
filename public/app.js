@@ -774,7 +774,7 @@ async function renderTransactions() {
         <input type="date" id="fTo" class="date-filter" value="${esc(state.txTo)}" title="종료일">
         <input type="search" id="fProduct" placeholder="품명 검색" value="${esc(state.txProductQuery)}">
         <button id="btnClearFilter" title="검색 조건 초기화">초기화</button>
-        <select id="entryVat" class="vat-select" title="빠른 입력 부가세 방식">
+        <select id="entryVat" class="vat-select" title="새로 적는 줄의 부가세 방식">
           ${Object.entries(VAT_LABEL).map(([v, l]) => `<option value="${v}" ${v === state.entryVat ? 'selected' : ''}>${l}</option>`).join('')}
         </select>
         <button id="btnAddPay" class="pay-btn">＋ 입금 받음</button>
@@ -785,35 +785,15 @@ async function renderTransactions() {
       </div>
       <p class="summary"><span id="txSummary"></span><span id="selSummary" class="sel-summary"></span></p>
       <div class="table-wrap ledger-wrap">
-        <table class="ledger-table">
+        <table class="ledger-table grid-table">
           <thead><tr><th class="chk"></th><th>날짜</th><th>상호</th><th>품명</th><th>규격</th><th class="num">수량</th><th class="num">단가</th><th class="num">공급가액</th><th class="num">합계</th><th class="num">세액</th><th class="num">입금</th><th class="num">잔액</th><th class="actions"></th></tr></thead>
           <tbody id="txRows"></tbody>
-          <tbody>
-            <tr class="entry-row">
-              <td class="chk"></td>
-              <td><input type="date" id="eDate" value="${esc(state.entryDate || today())}"></td>
-              <td><input id="eCompany" placeholder="상호 (ESC=찾기)" autocomplete="off"></td>
-              <td><input id="eName" placeholder="품명 (ESC=찾기)" autocomplete="off"></td>
-              <td><input id="eSpec" placeholder="규격"></td>
-              <td><input id="eQty" type="number" inputmode="decimal" step="any" value="1"></td>
-              <td><input id="ePrice" type="number" inputmode="numeric" placeholder="단가"></td>
-              <td class="num" id="eSupply">0</td>
-              <td class="num" id="eTotal">0</td>
-              <td class="num" id="eTax">0</td>
-              <td><input id="ePaid" type="number" inputmode="numeric" min="0" placeholder="0"></td>
-              <td class="num">—</td>
-              <td class="actions"><button class="primary" id="btnEntrySave">저장</button></td>
-            </tr>
-          </tbody>
         </table>
       </div>
       <p class="hint sheet-hint">
-        <span><b>Enter</b> 다음 칸 · 마지막 칸에서 저장</span>
-        <span><b>← →</b> 칸 이동</span>
-        <span><b>품명 비우면</b> 이전 품목 그대로</span>
-        <span><b>=</b> 부호 토글 · 연속 체크</span>
-        <span><b>−</b> 건너뛰기</span>
-        <span><b>Backspace</b> 되돌리기</span>
+        <span>빈 칸을 <b>눌러서</b> 적으세요 · 이미 적은 칸도 눌러 고칠 수 있습니다</span>
+        <span><b>Enter</b> 다음 칸 · 줄 끝에서 저장</span>
+        <span><b>↑↓ ← →</b> 칸 이동</span>
         <span><b>ESC</b> 그 칸으로 검색 (상호/품명)</span>
         <span><b>F2</b> 커서 고정</span>
         <button type="button" id="btnHelpInline" class="link-btn">자세한 사용법 보기</button>
@@ -822,27 +802,10 @@ async function renderTransactions() {
       <button type="button" class="fab fab-help" id="btnHelp" title="사용법 안내">?</button>
     </section>`;
 
-  const eCompany = $('#eCompany');
-  const setEntryCompany = applyEntryCompany; // 입력 행 상호 설정 (세션 동안 유지, 새로고침 시 초기화)
-  const preferred = state.companies.find((c) => String(c.id) === String(state.txCompanyId || state.entryCompanyId));
-  if (preferred) setEntryCompany(preferred);
-  else state.entryCompanyId = '';
-
-  // 입력 중에는 목록을 띄우지 않는다 — 찾을 땐 ESC(빠른 검색)를 쓴다
-  eCompany.addEventListener('input', () => {
-    state.entryCompanyId = ''; // 글자를 고치면 다시 선택해야 함
-  });
-  eCompany.addEventListener('blur', () => {
-    // 이름을 끝까지 정확히 입력한 경우는 자동 인정
-    if (state.entryCompanyId) return;
-    const m = state.companies.find((c) => c.name.toLowerCase() === eCompany.value.trim().toLowerCase());
-    if (m) setEntryCompany(m);
-  });
-
   $('#txCompany').addEventListener('change', (e) => {
     state.txCompanyId = e.target.value;
     const c = state.companies.find((x) => String(x.id) === e.target.value);
-    if (c) setEntryCompany(c);
+    if (c) state.entryCompanyId = String(c.id);
     drawTxRows();
   });
   $('#fFrom').addEventListener('change', (e) => {
@@ -875,56 +838,27 @@ async function renderTransactions() {
     try {
       localStorage.setItem('entryVat', e.target.value);
     } catch (err) { /* 무시 */ }
-    recomputeEntry();
   });
   $('#btnAddTx').addEventListener('click', () => openTxForm(null));
   $('#btnAddPay').addEventListener('click', () => openPaymentForm(null));
   $('#btnTxCsv').addEventListener('click', exportTransactionsCsv);
   $('#btnEasyOn').addEventListener('click', () => setEasyMode(true));
-  $('#eQty').addEventListener('input', () => {
-    state.entryQtyTouched = true;
-    recomputeEntry();
-  });
-  $('#ePrice').addEventListener('input', recomputeEntry);
-  // 품명을 비운 채 다음 칸으로 넘어가면 이전 품목을 그대로 채워 준다
-  $('#eName').addEventListener('blur', () => {
-    setTimeout(() => {
-      if ($('#eName') && !$('#eName').value.trim() && fillFromLastItem($('#eName'), $('#eSpec'), $('#ePrice'), $('#eQty'))) {
-        recomputeEntry();
-        toast('이전 품목을 불러왔습니다.');
-      }
-    }, 180); // 자동완성 힌트를 고르는 중이면 건너뛰도록 잠깐 기다린다
-  });
   $('#btnQuickSearch').addEventListener('click', toggleSearchSheet);
   $('#btnHelp').addEventListener('click', startTour);
   $('#btnHelpInline').addEventListener('click', startTour);
-  $('#btnEntrySave').addEventListener('click', saveEntry);
-  // 버튼을 누르면 포커스가 옮겨가므로 직전에 커서가 있던 칸을 기준으로 고정한다
   $('#btnPin').addEventListener('mousedown', (e) => e.preventDefault());
-  $('#btnPin').addEventListener('click', () => togglePin(document.activeElement));
-  $('.entry-row').addEventListener('keydown', (e) => {
-    if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT') return;
-    if (e.key === 'Enter' || e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
-      handleEntryKeys(e, saveEntry);
-    } else if (e.key === '=') {
-      // '=' 키로 단가(합계) 부호 토글: 8000 ⇄ -8000 (반품·차감 입력용)
-      e.preventDefault();
-      const el = $('#ePrice');
-      const v = Number(el.value) || 0;
-      if (v !== 0) {
-        el.value = -v;
-        recomputeEntry();
-      }
-    }
+  $('#btnPin').addEventListener('click', () => togglePin(gridEdit ? { id: 'g-' + gridEdit.field } : null));
+
+  // 아래로 내리면 빈 줄을 계속 만들어 준다 (엑셀처럼 끝없이 이어짐)
+  $('.ledger-wrap').addEventListener('scroll', (e) => {
+    const el = e.target;
+    if (el.scrollTop + el.clientHeight > el.scrollHeight - 120) addBlankRows(10);
   });
-  recomputeEntry();
+
   updatePinUI();
   await drawTxRows();
-  scrollSheetToBottom();
   maybeAutoTour(); // 처음 온 사용자에게 사용법 안내
 }
-
-// 첫 방문(또는 안내를 끝까지 본 적 없는 경우)에 한 번만 자동으로 튜토리얼을 띄운다
 function maybeAutoTour() {
   if (state.easyMode) return; // 큰 글씨 모드에는 안내 대상 요소가 없다
   let done = true;
@@ -933,7 +867,7 @@ function maybeAutoTour() {
   } catch (e) { /* localStorage 사용 불가 환경에선 띄우지 않음 */ }
   if (done) return;
   setTimeout(() => {
-    if ($('.entry-row') && $('#tourOverlay').classList.contains('hidden')) startTour();
+    if ($('.grid-table') && $('#tourOverlay').classList.contains('hidden')) startTour();
   }, 500);
 }
 
@@ -1210,6 +1144,7 @@ async function drawEasyList() {
 const SAVE_BAR_FIELDS = /^(eDate|eCompany|eName|eSpec|eQty|ePrice|ePaid|xDate|xCompany|xName|xQty|xPrice|xPaid)$/;
 
 function saveBarTarget() {
+  if (gridEdit) return gridEdit.input;
   const el = document.activeElement;
   return el && el.id && SAVE_BAR_FIELDS.test(el.id) ? el : null;
 }
@@ -1227,12 +1162,22 @@ function updateSaveBar() {
   const gap = vv ? Math.max(0, window.innerHeight - vv.height - vv.offsetTop) : 0;
   bar.style.bottom = gap + 'px';
 
-  const isEasy = state.easyMode;
-  const qty = Number($(isEasy ? '#xQty' : '#eQty')?.value) || 0;
-  const price = Number($(isEasy ? '#xPrice' : '#ePrice')?.value) || 0;
+  let qty = 0;
+  let price = 0;
+  let name = '';
+  if (state.easyMode) {
+    qty = Number($('#xQty')?.value) || 0;
+    price = Number($('#xPrice')?.value) || 0;
+    name = ($('#xName')?.value || '').trim();
+  } else if (gridEdit) {
+    const row = gridRows[gridEdit.r] || {};
+    const live = (f) => (gridEdit.field === f ? gridEdit.input.value : row[f]);
+    qty = Number(live('qty')) || 0;
+    price = Number(live('price')) || 0;
+    name = String(live('name') || '').trim();
+  }
   const r = calcItem(qty, price, state.entryVat);
   const total = r.supply + r.tax;
-  const name = ($(isEasy ? '#xName' : '#eName')?.value || '').trim();
   const info = $('#saveBarInfo');
   info.textContent = (name || '이전 품목') + ' · ' + won(total) + '원';
   info.classList.toggle('neg', total < 0);
@@ -1248,17 +1193,20 @@ if (window.visualViewport) {
   window.visualViewport.addEventListener('scroll', updateSaveBar);
 }
 $('#saveBar').addEventListener('mousedown', (e) => e.preventDefault()); // 커서를 잃지 않게
-$('#saveBarBtn').addEventListener('click', () => {
-  if (state.easyMode) saveEasyEntry();
-  else saveEntry();
+$('#saveBarBtn').addEventListener('click', async () => {
+  if (state.easyMode) return saveEasyEntry();
+  if (!gridEdit) return;
+  const r = gridEdit.r;
+  await commitCell(true);
+  startRowEdit(r + 1);
 });
 
 /* ─────────────── 커서 고정 ─────────────── */
 // 저장 후 커서가 돌아갈 칸을 지정한다 (지정 전 기본값은 품명).
 // PC: F2, 휴대폰: 📌 버튼. 기기에 기억되어 다음 접속에도 유지된다.
 const PIN_FIELDS = {
-  eDate: '날짜', eCompany: '상호', eName: '품명', eSpec: '규격',
-  eQty: '수량', ePrice: '단가', ePaid: '입금',
+  'g-date': '날짜', 'g-company': '상호', 'g-name': '품명', 'g-spec': '규격',
+  'g-qty': '수량', 'g-price': '단가', 'g-paid': '입금',
   xDate: '날짜', xCompany: '상호', xName: '품명', xQty: '수량',
   xPrice: '단가', xPaid: '받은 돈',
 };
@@ -1299,7 +1247,7 @@ function togglePin(el) {
 // 고정된 칸에 표시를 붙이고 버튼 문구를 갱신한다
 function updatePinUI() {
   $$('.pinned').forEach((el) => el.classList.remove('pinned'));
-  if (state.pinnedField) {
+  if (state.pinnedField && !state.pinnedField.startsWith('g-')) {
     const el = $('#' + state.pinnedField);
     if (el) el.classList.add('pinned');
   }
@@ -1318,7 +1266,7 @@ function updatePinUI() {
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'F2' || state.tab !== 'transactions') return;
   e.preventDefault();
-  togglePin(document.activeElement);
+  togglePin(gridEdit ? { id: 'g-' + gridEdit.field } : document.activeElement);
 });
 
 /* ─────────────── 입력칸 이동 (Enter / 방향키) ─────────────── */
@@ -1394,76 +1342,111 @@ function scrollSheetToBottom() {
   if (wrap) wrap.scrollTop = wrap.scrollHeight;
 }
 
-// 입력 행의 상호를 설정한다 (렌더 여부와 무관하게 상태를 갱신)
+// 입력 줄의 상호를 기억한다 (다음 줄을 적을 때 그대로 이어 쓴다)
 function applyEntryCompany(c) {
   state.entryCompanyId = String(c.id);
-  const el = $('#eCompany') || $('#xCompany');
-  if (el) el.value = c.name;
+  const x = $('#xCompany');
+  if (x) x.value = c.name;
+  if (gridEdit && gridEdit.field === 'company') gridEdit.input.value = c.name;
+  else if (gridRows[gridCursor.r] && gridRows[gridCursor.r].kind === 'new') {
+    gridRows[gridCursor.r].companyName = c.name;
+    paintRow(gridCursor.r);
+  }
 }
 
-function recomputeEntry() {
-  if (!$('#eQty')) return;
-  const r = calcItem(Number($('#eQty').value) || 0, Number($('#ePrice').value) || 0, state.entryVat);
-  $('#eSupply').textContent = won(r.supply);
-  $('#eTax').textContent = won(r.tax);
-  $('#eTotal').textContent = won(r.supply + r.tax);
-  $('#eSupply').classList.toggle('neg', r.supply < 0);
-  $('#eTax').classList.toggle('neg', r.tax < 0);
-  $('#eTotal').classList.toggle('neg', r.supply + r.tax < 0);
-}
+/* ─────────────── 엑셀식 셀 입력 그리드 ─────────────── */
+const GRID_COLS = ['date', 'company', 'name', 'spec', 'qty', 'price', 'paid'];
+const COL_INDEX = { date: 1, company: 2, name: 3, spec: 4, qty: 5, price: 6, supply: 7, total: 8, tax: 9, paid: 10, balance: 11 };
+const BLANK_ROWS = 20;
 
-async function saveEntry() {
-  const typedCompany = $('#eCompany').value.trim();
-  if (!state.entryCompanyId && !typedCompany) {
-    toast('상호를 입력하세요.');
-    $('#eCompany').focus();
-    return;
-  }
-  let name = $('#eName').value.trim();
-  if (!name) {
-    // 품명이 비어 있으면 직전 품목을 그대로 적용한다
-    if (fillFromLastItem($('#eName'), $('#eSpec'), $('#ePrice'), $('#eQty'))) {
-      recomputeEntry();
-      name = $('#eName').value.trim();
-    }
-  }
-  if (!name) {
-    toast('품명을 입력하세요.');
-    $('#eName').focus();
-    return;
-  }
-  const body = {
-    companyId: Number(state.entryCompanyId) || 0,
-    companyName: typedCompany, // 없는 상호면 서버가 자동 등록한다
-    date: $('#eDate').value || today(),
-    vatMode: state.entryVat,
-    items: [{ name, spec: $('#eSpec').value.trim(), qty: Number($('#eQty').value) || 0, price: Number($('#ePrice').value) || 0 }],
-    paid: Number($('#ePaid').value) || 0,
-    memo: '',
+let gridRows = [];                  // 화면에 보이는 줄 (거래·입금·빈 줄)
+let gridEdit = null;                // { r, field, input }
+let gridSearching = false;          // 검색 시트를 여는 중이면 셀 편집을 유지한다
+const gridCursor = { r: 0, field: 'company' };
+
+const blankRow = () => ({ kind: 'new', date: '', companyName: '', name: '', spec: '', qty: '', price: '', paid: '' });
+
+function rowFromTx(t) {
+  const it = t.items[0];
+  const multi = t.items.length > 1;
+  return {
+    kind: 'tx', id: t.id, tx: t, multi,
+    date: t.date, companyId: t.companyId, companyName: t.companyName,
+    name: it.name + (multi ? ` 외 ${t.items.length - 1}건` : ''), spec: multi ? '' : it.spec,
+    qty: multi ? '' : it.qty, price: multi ? '' : it.price,
+    supply: t.supplyTotal, total: t.total, tax: t.taxTotal, paid: t.paid,
   };
-  let tx;
-  try {
-    tx = await api('POST', '/api/transactions', body);
-  } catch (err) {
-    alert(err.message);
-    return;
+}
+
+function rowFromPay(x) {
+  return {
+    kind: 'pay', id: x.id, pay: x,
+    date: x.date, companyId: x.companyId, companyName: x.companyName,
+    name: '💰 입금 ' + (PAY_METHOD_LABEL[x.method] || '') + (x.memo ? ' · ' + x.memo : ''),
+    spec: '', qty: '', price: '', supply: '', total: '', tax: '', paid: x.amount,
+  };
+}
+
+// 새로 적는 줄은 화면에서 바로 계산해 보여준다
+function newRowCalc(row) {
+  const r = calcItem(Number(row.qty) || 0, Number(row.price) || 0, state.entryVat);
+  return { supply: r.supply, tax: r.tax, total: r.supply + r.tax };
+}
+
+function cellText(row, field) {
+  const v = row[field];
+  if (field === 'date' || field === 'company' || field === 'name' || field === 'spec') {
+    return field === 'company' ? row.companyName || '' : String(v == null ? '' : v);
   }
-  state.entryDate = body.date;
-  state.entryQtyTouched = false;
-  clearProductsCache(); // 자동 등록된 제품이 힌트에 바로 나오도록
-  await refreshCompanies(); // 자동 등록된 상호가 검색에 바로 나오도록
-  const savedCompany = state.companies.find((c) => c.id === tx.companyId);
-  if (savedCompany) applyEntryCompany(savedCompany);
-  $('#eName').value = '';
-  $('#eSpec').value = '';
-  $('#eQty').value = 1;
-  $('#ePrice').value = '';
-  $('#ePaid').value = '';
-  await drawTxRows();
-  toast('저장했습니다.');
-  scrollSheetToBottom();
-  updatePinUI();
-  focusAfterSave('eName');
+  return v === '' || v == null ? '' : won(v);
+}
+
+function rowHtml(row, i) {
+  const isNew = row.kind === 'new';
+  const calc = isNew ? newRowCalc(row) : row;
+  const editable = (f) => (row.kind === 'tx' && row.multi && ['name', 'spec', 'qty', 'price'].includes(f) ? '' : ' data-edit="1"');
+  const cell = (f, cls) => `<td class="${cls || ''}"${editable(f)} data-f="${f}">${esc(cellText(row, f))}</td>`;
+  const key = row.kind === 'new' ? '' : (row.kind === 'pay' ? 'p' : 't') + row.id;
+  const checked = key && checkedTxIds.has(key);
+  const num = (v, extra) => `<td class="num ${extra || ''}">${v === '' || v == null ? '' : won(v)}</td>`;
+  const balance = isNew ? '' : (row.kind === 'pay' ? '' : row.total - row.paid);
+  return `<tr data-r="${i}" data-kind="${row.kind}" data-id="${row.id || ''}" class="${row.kind === 'pay' ? 'row-pay' : ''} ${checked ? 'row-checked' : ''} ${isNew ? 'row-new' : ''}">
+    <td class="chk">${key ? `<input type="checkbox" ${checked ? 'checked' : ''}>` : ''}</td>
+    ${cell('date')}
+    ${cell('company', 'cell-company')}
+    ${cell('name')}
+    ${cell('spec')}
+    ${cell('qty', 'num')}
+    ${cell('price', 'num')}
+    ${num(isNew && !row.price ? '' : calc.supply, calc.supply < 0 ? 'neg' : '')}
+    ${num(isNew && !row.price ? '' : calc.total, calc.total < 0 ? 'neg' : '')}
+    ${num(isNew && !row.price ? '' : calc.tax, calc.tax < 0 ? 'neg' : '')}
+    ${cell('paid', 'num')}
+    ${num(balance, balance > 0 ? 'warn' : balance < 0 ? 'neg' : '')}
+    <td class="actions">${
+      row.kind === 'tx'
+        ? `<button data-act="sheet" data-id="${row.id}">명세표</button><button data-act="del" data-id="${row.id}" class="danger" title="삭제">✕</button>`
+        : row.kind === 'pay'
+        ? `<button data-act="pay-del" data-id="${row.id}" class="danger" title="삭제">✕</button>`
+        : ''
+    }</td>
+  </tr>`;
+}
+
+function paintRow(i) {
+  const tr = $(`#txRows tr[data-r="${i}"]`);
+  if (tr) tr.outerHTML = rowHtml(gridRows[i], i);
+}
+
+function addBlankRows(n) {
+  const tbody = $('#txRows');
+  if (!tbody) return;
+  let html = '';
+  for (let k = 0; k < n; k++) {
+    gridRows.push(blankRow());
+    html += rowHtml(gridRows[gridRows.length - 1], gridRows.length - 1);
+  }
+  tbody.insertAdjacentHTML('beforeend', html);
 }
 
 async function drawTxRows() {
@@ -1477,123 +1460,334 @@ async function drawTxRows() {
   const tbody = $('#txRows');
   if (!tbody) return;
 
-  // 날짜 범위·품명 검색 필터 (화면에서 걸러냄)
   const inRange = (d) => (!state.txFrom || d >= state.txFrom) && (!state.txTo || d <= state.txTo);
   const q = state.txProductQuery.trim().toLowerCase();
   let list = txCache.filter((t) => inRange(t.date));
   if (q) list = list.filter((t) => t.items.some((it) => it.name.toLowerCase().includes(q)));
-  // 품명으로 찾는 중에는 입금 줄을 숨긴다 (품명이 없는 줄이라 검색 대상이 아님)
   const payList = q ? [] : payCache.filter((x) => inRange(x.date));
 
   const total = list.reduce((s, t) => s + t.total, 0);
-  const paidInline = list.reduce((s, t) => s + t.paid, 0);
-  const received = payList.reduce((s, x) => s + x.amount, 0);
-  const paid = paidInline + received;
+  const received = list.reduce((s, t) => s + t.paid, 0) + payList.reduce((s, x) => s + x.amount, 0);
   $('#txSummary').textContent =
-    `거래 ${list.length}건 · 합계 ${won(total)}원 · 받은 돈 ${won(paid)}원` +
-    (received ? ` (입금 ${payList.length}건 ${won(received)}원 포함)` : '') +
-    ` · 미수 ${won(total - paid)}원`;
+    `거래 ${list.length}건 · 합계 ${won(total)}원 · 받은 돈 ${won(received)}원` +
+    (payList.length ? ` (입금 ${payList.length}건 포함)` : '') +
+    ` · 미수 ${won(total - received)}원`;
+
+  // 저장된 줄을 날짜순으로 깔고, 그 아래에 빈 줄을 이어 붙인다
+  gridRows = [
+    ...list.map((t) => Object.assign(rowFromTx(t), { sortKey: t.date + '|' + String(t.id).padStart(8, '0') })),
+    ...payList.map((x) => Object.assign(rowFromPay(x), { sortKey: x.date + '|' + String(x.id).padStart(8, '0') })),
+  ].sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+  for (let k = 0; k < BLANK_ROWS; k++) gridRows.push(blankRow());
+
+  tbody.innerHTML = gridRows.map((r, i) => rowHtml(r, i)).join('');
   updateSelSummary();
+  bindGridEvents(tbody);
+  // 새로 적을 수 있는 첫 빈 줄이 보이도록
+  const firstBlank = gridRows.findIndex((r) => r.kind === 'new');
+  const tr = $(`#txRows tr[data-r="${firstBlank}"]`);
+  if (tr) tr.scrollIntoView({ block: 'center' });
+}
 
-  // 거래와 입금을 한 장부로 합쳐 옛날 → 최신 순으로 보여준다
-  const rows = [
-    ...list.map((t) => Object.assign({ kind: 'tx' }, t)),
-    ...payList.map((x) => Object.assign({ kind: 'pay' }, x)),
-  ].sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
-
-  if (!rows.length) {
-    tbody.innerHTML = `<tr><td colspan="13" class="empty-cell">${txCache.length ? '검색 조건에 맞는 거래가 없습니다.' : '아직 거래가 없습니다. 아래 파란 입력 행에서 첫 거래를 적어보세요.'}</td></tr>`;
-    return;
-  }
-  tbody.innerHTML = rows
-    .map((t, i) => {
-      if (t.kind === 'pay') {
-        const checked = checkedTxIds.has('p' + t.id);
-        return `<tr data-id="${t.id}" data-kind="pay" data-idx="${i}" class="row-pay ${checked ? 'row-checked' : ''}">
-          <td class="chk"><input type="checkbox" ${checked ? 'checked' : ''}></td>
-          <td>${esc(t.date)}</td>
-          <td><b>${esc(t.companyName)}</b></td>
-          <td colspan="6" class="pay-label">💰 입금 <span class="sub">${PAY_METHOD_LABEL[t.method] || ''}${t.memo ? ' · ' + esc(t.memo) : ''}</span></td>
-          <td class="num"><b>${won(t.amount)}</b></td>
-          <td class="num">—</td>
-          <td class="actions">
-            <button data-act="pay-edit" data-id="${t.id}">수정</button>
-            <button data-act="pay-del" data-id="${t.id}" class="danger" title="삭제">✕</button>
-          </td>
-        </tr>`;
-      }
-      const single = t.items.length === 1;
-      const it = t.items[0];
-      const balance = t.total - t.paid;
-      const checked = checkedTxIds.has('t' + t.id);
-      return `<tr data-id="${t.id}" data-kind="tx" data-idx="${i}" class="${checked ? 'row-checked' : ''}">
-        <td class="chk"><input type="checkbox" ${checked ? 'checked' : ''}></td>
-        <td>${esc(t.date)}</td>
-        <td><b>${esc(t.companyName)}</b></td>
-        <td>${esc(it.name)}${single ? '' : ` <span class="sub">외 ${t.items.length - 1}건</span>`}${t.memo ? `<div class="sub">${esc(t.memo)}</div>` : ''}</td>
-        <td>${single ? esc(it.spec) : ''}</td>
-        <td class="num">${single ? won(it.qty) : ''}</td>
-        <td class="num">${single ? won(it.price) : ''}</td>
-        <td class="num ${t.supplyTotal < 0 ? 'neg' : ''}">${won(t.supplyTotal)}</td>
-        <td class="num ${t.total < 0 ? 'neg' : ''}"><b>${won(t.total)}</b></td>
-        <td class="num ${t.taxTotal < 0 ? 'neg' : ''}">${won(t.taxTotal)}</td>
-        <td class="num">${won(t.paid)}</td>
-        <td class="num ${balance > 0 ? 'warn' : balance < 0 ? 'neg' : ''}">${won(balance)}</td>
-        <td class="actions">
-          <button data-act="sheet" data-id="${t.id}">명세표</button>
-          <button data-act="edit" data-id="${t.id}">수정</button>
-          <button data-act="del" data-id="${t.id}" class="danger" title="삭제">✕</button>
-        </td>
-      </tr>`;
-    })
-    .join('');
+function bindGridEvents(tbody) {
   tbody.onclick = async (e) => {
     const btn = e.target.closest('button[data-act]');
-    if (btn) {
-      const id = Number(btn.dataset.id);
-      const act = btn.dataset.act;
-      if (act === 'pay-edit' || act === 'pay-del') {
-        const pay = payCache.find((x) => x.id === id);
-        if (!pay) return;
-        if (act === 'pay-edit') openPaymentForm(pay);
-        else {
-          if (!confirm(`${pay.date} '${pay.companyName}' 입금 ${won(pay.amount)}원을 삭제할까요?`)) return;
-          await api('DELETE', '/api/payments/' + id);
-          checkedTxIds.delete('p' + id);
-          toast('입금 내역을 삭제했습니다.');
-          await refreshCompanies();
-          drawTxRows();
-        }
-        return;
-      }
-      const t = txCache.find((x) => x.id === id);
-      if (!t) return;
-      if (act === 'sheet') openStatement(t);
-      else if (act === 'edit') openTxForm(t);
-      else if (act === 'del') {
-        if (!confirm(`${t.date} '${t.companyName}' 거래를 삭제할까요?`)) return;
-        await api('DELETE', '/api/transactions/' + id);
-        checkedTxIds.delete('t' + id);
-        toast('거래를 삭제했습니다.');
-        drawTxRows();
-      }
+    if (btn) return handleRowAction(btn);
+    const cb = e.target.closest('input[type="checkbox"]');
+    const td = e.target.closest('td');
+    const tr = e.target.closest('tr[data-r]');
+    if (!tr || !td) return;
+    const i = Number(tr.dataset.r);
+    if (td.classList.contains('chk')) {
+      if (!cb) return;
+      const key = (tr.dataset.kind === 'pay' ? 'p' : 't') + tr.dataset.id;
+      if (cb.checked) checkedTxIds.add(key);
+      else checkedTxIds.delete(key);
+      tr.classList.toggle('row-checked', cb.checked);
+      sheetLastIdx = i;
+      updatePointerHighlight();
+      updateSelSummary();
       return;
     }
-    // 행 아무 곳이나 누르면 체크 토글
-    const tr = e.target.closest('tr[data-id]');
-    if (!tr) return;
-    const cb = tr.querySelector('input[type="checkbox"]');
-    if (!cb) return;
-    if (e.target !== cb) cb.checked = !cb.checked;
-    const id = rowKey(tr);
-    if (cb.checked) checkedTxIds.add(id);
-    else checkedTxIds.delete(id);
-    tr.classList.toggle('row-checked', cb.checked);
-    sheetLastIdx = Number(tr.dataset.idx);
-    updatePointerHighlight();
-    updateSelSummary();
+    if (td.dataset.edit) openCellEditor(i, td.dataset.f);
   };
+}
+
+async function handleRowAction(btn) {
+  const id = Number(btn.dataset.id);
+  const act = btn.dataset.act;
+  if (act === 'pay-del') {
+    const pay = payCache.find((x) => x.id === id);
+    if (!pay || !confirm(`${pay.date} '${pay.companyName}' 입금 ${won(pay.amount)}원을 삭제할까요?`)) return;
+    await api('DELETE', '/api/payments/' + id);
+    checkedTxIds.delete('p' + id);
+    toast('입금 내역을 삭제했습니다.');
+    await refreshCompanies();
+    return drawTxRows();
+  }
+  const t = txCache.find((x) => x.id === id);
+  if (!t) return;
+  if (act === 'sheet') return openStatement(t);
+  if (act === 'del') {
+    if (!confirm(`${t.date} '${t.companyName}' 거래를 삭제할까요?`)) return;
+    await api('DELETE', '/api/transactions/' + id);
+    checkedTxIds.delete('t' + id);
+    toast('거래를 삭제했습니다.');
+    await refreshCompanies();
+    drawTxRows();
+  }
+}
+
+/* ── 셀 편집기 ── */
+function openCellEditor(r, field) {
+  const row = gridRows[r];
+  if (!row) return;
+  if (gridEdit && (gridEdit.r !== r || gridEdit.field !== field)) closeCellEditor();
+  if (gridEdit) return;
+
+  const td = $(`#txRows tr[data-r="${r}"] td[data-f="${field}"]`);
+  if (!td) return;
+  const isNum = ['qty', 'price', 'paid'].includes(field);
+  const input = document.createElement('input');
+  input.className = 'cell-input';
+  if (field === 'date') input.type = 'date';
+  else if (isNum) {
+    input.type = 'number';
+    input.inputMode = field === 'qty' ? 'decimal' : 'numeric';
+    if (field === 'qty') input.step = 'any';
+  }
+  const raw = field === 'company' ? row.companyName : row[field];
+  input.value = field === 'date' && !raw && row.kind === 'new' ? state.entryDate || today() : raw == null ? '' : raw;
+  if (field === 'company' && row.kind === 'new' && !raw) {
+    const c = state.companies.find((x) => String(x.id) === String(state.entryCompanyId));
+    if (c) input.value = c.name;
+  }
+  td.textContent = '';
+  td.appendChild(input);
+  td.classList.add('cell-editing');
+  input.focus();
+  input.select();
+  gridEdit = { r, field, input, td };
+  gridCursor.r = r;
+  gridCursor.field = field;
+  sheetLastIdx = r;
   updatePointerHighlight();
+  updateSaveBar();
+
+  input.addEventListener('keydown', onCellKey);
+  input.addEventListener('blur', () => setTimeout(() => {
+    if (gridSearching) return; // 검색창으로 옮겨간 것뿐이므로 그대로 둔다
+    if (gridEdit && gridEdit.input === input && document.activeElement !== input) commitCell(true);
+  }, 120));
+}
+
+function closeCellEditor() {
+  if (!gridEdit) return;
+  const { r } = gridEdit;
+  gridEdit = null;
+  paintRow(r);
+  updateSaveBar();
+}
+
+// 편집 중인 값을 줄에 반영한다 (leaveRow=true면 줄을 벗어나는 상황)
+async function commitCell(mayLeave) {
+  if (!gridEdit) return;
+  const { r, field, input } = gridEdit;
+  const row = gridRows[r];
+  const value = input.value.trim();
+  gridEdit = null;
+
+  if (!row) return;
+  if (field === 'company') {
+    row.companyName = value;
+    const found = state.companies.find((c) => c.name.toLowerCase() === value.toLowerCase());
+    row.companyId = found ? found.id : 0;
+    if (found) state.entryCompanyId = String(found.id);
+  } else if (['qty', 'price', 'paid'].includes(field)) {
+    row[field] = value === '' ? '' : Number(value) || 0;
+  } else {
+    row[field] = value;
+  }
+  if (row.kind === 'new' && field === 'date') state.entryDate = value;
+
+  paintRow(r);
+  if (row.kind === 'tx' || row.kind === 'pay') await saveExistingRow(row, r);
+  else if (mayLeave) await saveNewRowIfReady(r);
+  updateSaveBar();
+}
+
+// 기존 줄은 셀을 고칠 때마다 바로 저장한다
+async function saveExistingRow(row, r) {
+  try {
+    if (row.kind === 'pay') {
+      await api('PUT', '/api/payments/' + row.id, {
+        companyId: row.companyId, companyName: row.companyName,
+        date: row.date, amount: Number(row.paid) || 0,
+        method: row.pay.method, memo: row.pay.memo,
+      });
+    } else {
+      const items = row.multi
+        ? row.tx.items
+        : [{ name: row.name, spec: row.spec, qty: Number(row.qty) || 0, price: Number(row.price) || 0 }];
+      const saved = await api('PUT', '/api/transactions/' + row.id, {
+        companyId: row.companyId, companyName: row.companyName,
+        date: row.date, vatMode: row.tx.vatMode, items,
+        paid: Number(row.paid) || 0, memo: row.tx.memo,
+      });
+      Object.assign(row, rowFromTx(Object.assign({ companyName: row.companyName }, saved)));
+    }
+    toast('고쳤습니다.');
+    await refreshCompanies();
+    clearProductsCache();
+    paintRow(r);
+    updateSummaryOnly();
+  } catch (e) {
+    alert(e.message);
+    drawTxRows();
+  }
+}
+
+// 빈 줄에 상호·품명이 채워졌으면 새 거래로 저장한다
+async function saveNewRowIfReady(r) {
+  const row = gridRows[r];
+  if (!row || row.kind !== 'new') return false;
+  if (!row.companyName.trim()) return false;
+  if (!row.name.trim() && !fillNewRowFromLast(row)) return false;
+  if (!row.name.trim()) return false;
+
+  try {
+    const tx = await api('POST', '/api/transactions', {
+      companyId: row.companyId || 0,
+      companyName: row.companyName,
+      date: row.date || today(),
+      vatMode: state.entryVat,
+      items: [{ name: row.name, spec: row.spec, qty: Number(row.qty) || 1, price: Number(row.price) || 0 }],
+      paid: Number(row.paid) || 0,
+      memo: '',
+    });
+    await refreshCompanies();
+    clearProductsCache();
+    txCache = [tx, ...txCache];
+    const c = state.companies.find((x) => x.id === tx.companyId);
+    if (c) state.entryCompanyId = String(c.id);
+    state.entryDate = tx.date;
+    gridRows[r] = rowFromTx(Object.assign({ companyName: c ? c.name : row.companyName }, tx));
+    paintRow(r);
+    updateSummaryOnly();
+    toast('저장했습니다.');
+    return true;
+  } catch (e) {
+    alert(e.message);
+    return false;
+  }
+}
+
+// 품명을 비워둔 채 저장하면 직전 품목을 그대로 가져온다
+function fillNewRowFromLast(row) {
+  const last = getLastItem();
+  if (!last) return false;
+  row.name = last.name;
+  row.spec = last.spec;
+  if (row.price === '' || row.price == null) row.price = last.price;
+  if (row.qty === '' || row.qty == null) row.qty = last.qty;
+  return true;
+}
+
+function updateSummaryOnly() {
+  const el = $('#txSummary');
+  if (!el) return;
+  const rows = gridRows.filter((r) => r.kind !== 'new');
+  const total = rows.filter((r) => r.kind === 'tx').reduce((s, r) => s + r.total, 0);
+  const received =
+    rows.filter((r) => r.kind === 'tx').reduce((s, r) => s + (Number(r.paid) || 0), 0) +
+    rows.filter((r) => r.kind === 'pay').reduce((s, r) => s + (Number(r.paid) || 0), 0);
+  const payCount = rows.filter((r) => r.kind === 'pay').length;
+  el.textContent =
+    `거래 ${rows.filter((r) => r.kind === 'tx').length}건 · 합계 ${won(total)}원 · 받은 돈 ${won(received)}원` +
+    (payCount ? ` (입금 ${payCount}건 포함)` : '') +
+    ` · 미수 ${won(total - received)}원`;
+}
+
+/* ── 셀 사이 이동 ── */
+function editableFields(row) {
+  if (!row) return GRID_COLS;
+  if (row.kind === 'pay') return ['date', 'company', 'paid'];
+  if (row.kind === 'tx' && row.multi) return ['date', 'company', 'paid'];
+  return GRID_COLS;
+}
+
+async function moveCell(dr, dfield) {
+  if (!gridEdit) return;
+  const { r, field } = gridEdit;
+  const row = gridRows[r];
+  const fields = editableFields(row);
+  let nr = r;
+  let nf = field;
+
+  if (dfield) {
+    const i = fields.indexOf(field);
+    const ni = i + dfield;
+    if (ni < 0 || ni >= fields.length) {
+      if (dfield > 0) { // 줄 끝 → 저장하고 다음 줄로
+        await commitCell(true);
+        return startRowEdit(r + 1);
+      }
+      nr = r - 1;
+      nf = fields[fields.length - 1];
+    } else {
+      nf = fields[ni];
+    }
+  } else {
+    nr = r + dr;
+  }
+  if (nr < 0 || nr >= gridRows.length) return;
+
+  const leaving = nr !== r;
+  await commitCell(leaving);
+  const target = gridRows[nr];
+  const tf = editableFields(target).includes(nf) ? nf : editableFields(target)[0];
+  openCellEditor(nr, tf);
+}
+
+// 다음 줄을 적기 시작한다 (커서 고정 칸이 있으면 그 칸부터)
+function startRowEdit(r) {
+  if (r >= gridRows.length - 3) addBlankRows(10);
+  const row = gridRows[r];
+  if (!row) return;
+  const pinned = state.pinnedField && state.pinnedField.startsWith('g-') ? state.pinnedField.slice(2) : '';
+  const fields = editableFields(row);
+  const field = fields.includes(pinned) ? pinned : row.kind === 'new' ? 'company' : fields[0];
+  openCellEditor(r, field);
+  const tr = $(`#txRows tr[data-r="${r}"]`);
+  if (tr) scrollRowIntoView(tr);
+}
+
+function onCellKey(e) {
+  const { field, input } = gridEdit || {};
+  if (!gridEdit) return;
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    moveCell(0, 1);
+  } else if (e.key === 'Tab') {
+    e.preventDefault();
+    moveCell(0, e.shiftKey ? -1 : 1);
+  } else if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    moveCell(1, 0);
+  } else if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    moveCell(-1, 0);
+  } else if (e.key === 'ArrowRight' && caretAtEdge(input, 1)) {
+    e.preventDefault();
+    moveCell(0, 1);
+  } else if (e.key === 'ArrowLeft' && caretAtEdge(input, -1)) {
+    e.preventDefault();
+    moveCell(0, -1);
+  } else if (e.key === '=' && ['price', 'paid', 'qty'].includes(field)) {
+    e.preventDefault();
+    const v = Number(input.value) || 0;
+    if (v !== 0) input.value = -v;
+  }
 }
 
 // 체크된 거래의 소계 표시
@@ -1617,9 +1811,8 @@ function scrollRowIntoView(tr) {
   const wrap = $('.ledger-wrap');
   if (!wrap || !tr) return;
   const head = $('.ledger-table thead', wrap);
-  const entry = $('.entry-row', wrap);
   const headH = head ? head.getBoundingClientRect().height : 0;
-  const entryH = entry ? entry.getBoundingClientRect().height : 0;
+  const entryH = 0;
   const wrapRect = wrap.getBoundingClientRect();
   const rowRect = tr.getBoundingClientRect();
   const lookahead = rowRect.height; // 다음에 체크될 줄도 미리 보이게
@@ -1635,7 +1828,7 @@ function scrollRowIntoView(tr) {
 
 // 포인터(현재 위치) 행 표시 — 어느 행에서 이어갈지 파란 테두리로 보여준다
 function updatePointerHighlight() {
-  const rows = $$('#txRows tr[data-id]');
+  const rows = $$('#txRows tr');
   rows.forEach((tr) => tr.classList.remove('row-pointer'));
   if (sheetLastIdx != null && sheetLastIdx >= 0 && rows[sheetLastIdx]) {
     rows[sheetLastIdx].classList.add('row-pointer');
@@ -1645,7 +1838,7 @@ function updatePointerHighlight() {
 // '=' 연속 체크: 포인터의 다음 행을 체크 (키를 누르고 있으면 반복)
 function checkNextRow() {
   if (sheetLastIdx == null) return;
-  const rows = $$('#txRows tr[data-id]');
+  const rows = $$('#txRows tr[data-id]:not([data-id=""])');
   const next = rows[sheetLastIdx + 1];
   if (!next) {
     toast('마지막 줄입니다.');
@@ -1696,7 +1889,7 @@ function undoCheckRow() {
 }
 
 document.addEventListener('keydown', (e) => {
-  if (state.tab !== 'transactions') return;
+  if (state.tab !== 'transactions' || gridEdit) return;
   if (e.key !== '=' && e.key !== '-' && e.key !== 'Backspace') return;
   if (e.target.closest('input, select, textarea')) return; // 입력 중일 땐 원래 동작 유지
   if (!$('#modal').classList.contains('hidden')) return;
@@ -1733,18 +1926,29 @@ function openSearchSheet(tab, query) {
 
 // 커서가 있던 칸에 맞춰 검색 대상과 검색어를 정한다
 function openContextSearch() {
+  if (gridEdit) {
+    const value = gridEdit.input.value.trim();
+    if (gridEdit.field === 'company' || gridEdit.field === 'name') {
+      gridSearching = true;
+      return openSearchSheet(gridEdit.field === 'company' ? 'company' : 'product', value);
+    }
+  }
   const el = document.activeElement;
   const id = el && el.id;
   const value = el && typeof el.value === 'string' ? el.value.trim() : '';
-  if (id === 'eCompany' || id === 'xCompany') return openSearchSheet('company', value);
-  if (id === 'eName' || id === 'xName') return openSearchSheet('product', value);
+  if (id === 'xCompany') return openSearchSheet('company', value);
+  if (id === 'xName') return openSearchSheet('product', value);
   openSearchSheet(null, '');
 }
 
 function closeSearchSheet() {
   $('#searchSheet').classList.add('hidden');
   document.body.classList.remove('sheet-open');
-  scrollSheetToBottom();
+  if (gridSearching) {
+    gridSearching = false;
+    // 고르지 않고 닫았으면 원래 칸으로 커서를 돌려준다
+    if (gridEdit && gridEdit.input && gridEdit.input.isConnected) gridEdit.input.focus();
+  }
 }
 
 function toggleSearchSheet() {
@@ -1903,10 +2107,40 @@ async function saveCompanyField(inp) {
 function ssPick(i) {
   const it = ss.items[i];
   if (!it) return;
-  const nameEl = $('#eName') || $('#xName');
-  const specEl = $('#eSpec');
-  const priceEl = $('#ePrice') || $('#xPrice');
-  const qtyEl = $('#eQty') || $('#xQty');
+  // 장부 그리드에서 셀을 편집하는 중이면 그 줄에 채워 넣는다
+  if (!state.easyMode && gridEdit) {
+    const r = gridEdit.r;
+    const row = gridRows[r];
+    gridSearching = false;
+    gridEdit = null; // 편집 중이던 값은 버리고 고른 값으로 채운다
+    paintRow(r);
+    if (ss.tab === 'company') {
+      row.companyName = it.name;
+      row.companyId = it.id;
+      state.entryCompanyId = String(it.id);
+      paintRow(r);
+      closeSearchSheet();
+      if (row.kind === 'tx' || row.kind === 'pay') saveExistingRow(row, r);
+      return openCellEditor(r, editableFields(row).includes('name') ? 'name' : 'date');
+    }
+    const c = state.companies.find((x) => x.id === it.companyId);
+    if (c) {
+      row.companyName = c.name;
+      row.companyId = c.id;
+      state.entryCompanyId = String(c.id);
+    }
+    row.name = it.name;
+    row.spec = it.spec;
+    row.price = it.price;
+    if (row.qty === '' || row.qty == null) row.qty = 1;
+    paintRow(r);
+    closeSearchSheet();
+    if (row.kind === 'tx') saveExistingRow(row, r);
+    return openCellEditor(r, 'qty');
+  }
+  const nameEl = $('#xName');
+  const priceEl = $('#xPrice');
+  const qtyEl = $('#xQty');
   if (ss.tab === 'company') {
     applyEntryCompany(it);
     closeSearchSheet();
@@ -1916,10 +2150,8 @@ function ssPick(i) {
   const c = state.companies.find((x) => x.id === it.companyId);
   if (c) applyEntryCompany(c); // 제품을 고르면 그 제품의 상호까지 함께 적용
   if (nameEl) nameEl.value = it.name;
-  if (specEl) specEl.value = it.spec;
   if (priceEl) priceEl.value = it.price;
   if (state.easyMode) easyRecompute();
-  else recomputeEntry();
   closeSearchSheet();
   if (qtyEl) {
     qtyEl.focus();
@@ -1956,8 +2188,11 @@ document.addEventListener('keydown', (e) => {
   if (!$('#modal').classList.contains('hidden')) return;
   if (document.body.classList.contains('printing')) return;
   e.preventDefault();
-  if (searchSheetOpen()) closeSearchSheet();
-  else openContextSearch();
+  if (searchSheetOpen()) return closeSearchSheet();
+  if (gridEdit && gridEdit.field !== 'company' && gridEdit.field !== 'name') {
+    return closeCellEditor(); // 적던 값을 버리고 편집만 닫는다
+  }
+  openContextSearch();
 });
 
 /* ── 거래 입력/수정 폼 ── */
@@ -2504,33 +2739,33 @@ const TOUR_STEPS = [
     pos: 'bottom',
   },
   {
-    sel: '.entry-row',
-    title: '맨 아래 파란 줄에 바로 적으세요',
-    body: '날짜·상호·품명·수량·단가를 적고 Enter를 누르면 즉시 저장되고, 다음 줄을 이어서 적을 수 있습니다. 공급가액·세액·합계는 자동으로 계산됩니다.',
+    sel: '#txRows tr.row-new',
+    title: '빈 칸을 눌러서 적으세요',
+    body: '엑셀처럼 빈 칸을 누르면 그 자리에서 바로 입력됩니다. 날짜·상호·품명·수량·단가를 적고 줄 끝에서 Enter를 누르면 저장되고 다음 줄로 넘어갑니다. 공급가액·세액·합계는 자동으로 계산됩니다. 아래로 내리면 빈 줄이 계속 이어집니다.',
     pos: 'top',
   },
   {
-    sel: '#eCompany',
+    sel: '#txRows tr.row-new td[data-f="company"]',
     title: '상호는 그냥 적으면 등록됩니다',
     body: '상호명을 그대로 적으면 됩니다. 처음 보는 이름이면 자동으로 새로 등록되니 미리 만들어 둘 필요가 없습니다. 찾아서 고르고 싶으면 몇 글자만 적고 ESC를 누르세요 — 그 글자로 시작하는 상호가 아래에 뜹니다. 한 번 정하면 계속 유지됩니다.',
     pos: 'top',
   },
   {
-    sel: '#eName',
+    sel: '#txRows tr.row-new td[data-f="name"]',
     title: '품명도 자동으로 쌓입니다',
     body: '품명을 적으면 그대로 제품으로 등록되고, 단가를 바꿔 적으면 최신 단가로 갱신됩니다. 예전에 팔던 걸 찾을 땐 몇 글자 적고 ESC를 누르세요 — 고르면 규격·단가까지 채워집니다. 같은 걸 또 적을 땐 품명을 비워두면 직전 품목이 그대로 들어갑니다.',
     pos: 'top',
   },
   {
-    sel: '#ePrice',
+    sel: '#txRows tr.row-new td[data-f="price"]',
     title: '반품·차감은 = 키로',
     body: '단가를 적고 = 키를 누르면 마이너스로 바뀝니다(한 번 더 누르면 원래대로). 마이너스 금액은 표에서 빨간색으로 보입니다.',
     pos: 'top',
   },
   {
-    sel: '#txRows tr[data-id]',
-    title: '행을 눌러 체크하고 소계 보기',
-    body: '행 아무 곳이나 누르면 체크됩니다. 체크한 뒤 = 키를 누르면 다음 줄이 연달아 체크되고, − 는 건너뛰기, Backspace 는 되돌리기입니다. 체크한 것들의 합계가 위에 표시됩니다.',
+    sel: '#txRows tr[data-kind="tx"] td.chk',
+    title: '왼쪽 네모로 체크하고 소계 보기',
+    body: '줄 왼쪽 네모를 누르면 체크됩니다. 체크한 뒤 = 키를 누르면 다음 줄이 연달아 체크되고, − 는 건너뛰기, Backspace 는 되돌리기입니다. 체크한 것들의 합계가 위에 표시됩니다.',
     pos: 'bottom',
     optional: true,
   },
@@ -2547,7 +2782,7 @@ const TOUR_STEPS = [
     pos: 'left',
   },
   {
-    sel: '#txRows tr[data-id] button[data-act="sheet"]',
+    sel: '#txRows tr[data-kind="tx"] button[data-act="sheet"]',
     title: '거래명세표 인쇄',
     body: '[명세표] 버튼으로 거래명세표를 띄워 인쇄하거나 PDF로 저장합니다. 공급받는자 정보는 명세표에서 바로 고칠 수 있고, 공급자 정보는 [내 정보] 탭에서 설정합니다.',
     pos: 'bottom',
@@ -2555,8 +2790,8 @@ const TOUR_STEPS = [
   },
   {
     sel: '#btnPin',
-    title: '저장 후 커서 자리 정하기 (커서 고정)',
-    body: '저장하면 커서는 품명 칸으로 돌아갑니다. 다른 칸에서 이어 적고 싶으면, 그 칸을 누른 뒤 F2(또는 이 📌 버튼)를 누르세요. 저장할 때마다 고정한 칸으로 돌아갑니다. 한 번 더 누르면 해제됩니다.',
+    title: '다음 줄을 어느 칸부터 적을지 (커서 고정)',
+    body: '줄을 저장하면 다음 줄의 상호 칸부터 시작합니다. 늘 같은 칸부터 적고 싶으면 그 칸을 누른 뒤 F2(또는 이 📌 버튼)를 누르세요. 한 번 더 누르면 해제됩니다.',
     pos: 'top',
   },
   {
