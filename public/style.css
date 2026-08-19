@@ -767,6 +767,90 @@ body.easy .fab, body.easy .fab-help { display: none; }
   body.printing .party-input { border: none; background: none; }
 }
 
+/* ─────────────── 휴대폰 전용 장부 레이아웃 ─────────────── */
+/* 좁은 화면에서는 표를 가로로 밀지 않고, 한 거래를 두세 줄 카드처럼 접어서 보여준다 */
+@media (max-width: 700px) {
+  .ledger-wrap { overflow-x: hidden; max-height: calc(100vh - 260px); }
+  .grid-table { font-size: 0.95rem; }
+  .grid-table thead { display: none; }
+
+  .grid-table tbody tr {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 0.1rem 0.55rem;
+    padding: 0.5rem 0.5rem 0.55rem;
+    border-bottom: 1px solid var(--line);
+  }
+
+  .grid-table tbody td {
+    border: none;
+    padding: 0.15rem 0.1rem;
+    height: auto;
+    white-space: nowrap;
+  }
+
+  /* 첫 줄: 날짜 · 상호 ······ 합계 */
+  .grid-table td[data-f="date"] { font-size: 0.85rem; color: var(--sub); }
+  .grid-table td[data-f="company"] { font-weight: 700; font-size: 1.02rem; }
+  .grid-table td[data-f="total"] { margin-left: auto; font-weight: 800; font-size: 1.05rem; }
+  .grid-table td[data-f="total"]::before { content: '합계 '; font-weight: 400; font-size: 0.75rem; color: var(--sub); }
+
+  /* 둘째 줄부터: 품명 규격 수량 단가 … */
+  .grid-table td[data-f="name"] { flex: 0 0 100%; font-weight: 600; }
+  .grid-table td[data-f="qty"]::before { content: '수량 '; font-size: 0.75rem; color: var(--sub); }
+  .grid-table td[data-f="price"]::before { content: '단가 '; font-size: 0.75rem; color: var(--sub); }
+  .grid-table td[data-f="paid"]::before { content: '입금 '; font-size: 0.75rem; color: var(--sub); }
+  .grid-table td[data-f="balance"]::before { content: '잔액 '; font-size: 0.75rem; color: var(--sub); }
+  .grid-table td[data-f="spec"]:not(:empty)::before { content: '규격 '; font-size: 0.75rem; color: var(--sub); }
+  .grid-table tr:not(.row-new) td[data-f="spec"]:empty { display: none; }
+
+  /* 공급가액·세액은 화면이 좁을 때 감춘다 (합계로 충분) */
+  .grid-table td[data-f="supply"], .grid-table td[data-f="tax"] { display: none; }
+
+  .grid-table td.chk { flex: 0 0 1.4rem; }
+  /* 버튼은 잔액 옆에 작게 붙여 줄 수를 줄인다 */
+  .grid-table td.actions { margin-left: auto; display: flex; gap: 0.25rem; }
+  .grid-table td.actions button { padding: 0.3rem 0.5rem; font-size: 0.8rem; margin: 0; }
+  .grid-table td.actions button[data-act="sheet"] { font-size: 0; padding: 0.3rem 0.55rem; }
+  .grid-table td.actions button[data-act="sheet"]::after { content: '📄'; font-size: 1rem; }
+
+  /* 도구 버튼은 좁은 화면에서 아이콘만 */
+  .section-head .pin-label { display: none; }
+  #btnTxCsv { font-size: 0; padding: 0.45rem 0.6rem; }
+  #btnTxCsv::after { content: '📄'; font-size: 1rem; }
+
+  /* 빈 줄은 어디를 눌러야 할지 보이도록 칸 이름을 흐리게 표시 */
+  .grid-table tr.row-new td[data-f="date"]:empty::after,
+  .grid-table tr.row-new td[data-f="company"]:empty::after,
+  .grid-table tr.row-new td[data-f="name"]:empty::after {
+    content: attr(data-ph);
+    color: #b9c0cb;
+    font-weight: 400;
+  }
+  .grid-table tr.row-new td[data-f="qty"]:empty::before,
+  .grid-table tr.row-new td[data-f="price"]:empty::before { color: #b9c0cb; }
+
+  /* 빈 줄은 한 줄로 짧게 (규격·입금은 저장한 뒤 눌러서 채운다) */
+  .grid-table tr.row-new { background: #fbfdff; }
+  .grid-table tr.row-new td[data-f="name"] { flex: 1 1 auto; }
+  .grid-table tr.row-new td[data-f="spec"],
+  .grid-table tr.row-new td[data-f="paid"],
+  .grid-table tr.row-new td[data-f="total"],
+  .grid-table tr.row-new td[data-f="balance"],
+  .grid-table tr.row-new td.chk,
+  .grid-table tr.row-new td.actions { display: none; }
+  /* 적기 시작하면 필요한 칸이 모두 나온다 */
+  .grid-table tr.row-new:has(td.cell-editing) td[data-f="spec"],
+  .grid-table tr.row-new:has(td.cell-editing) td[data-f="paid"],
+  .grid-table tr.row-new:has(td.cell-editing) td[data-f="total"] { display: block; }
+  .grid-table tr.row-new:has(td.cell-editing) td[data-f="name"] { flex: 0 0 100%; }
+
+  /* 편집 중인 칸은 넉넉하게 */
+  .grid-table td.cell-editing { flex: 1 1 8rem; padding: 0; }
+  .cell-input { font-size: 1rem; padding: 0.5rem 0.5rem; }
+}
+
 /* ─────────────── 모바일 ─────────────── */
 @media (max-width: 640px) {
   html { font-size: 15px; }
