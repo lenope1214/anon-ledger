@@ -768,9 +768,28 @@ body.easy .fab, body.easy .fab-help { display: none; }
 }
 
 /* ─────────────── 휴대폰 전용 장부 레이아웃 ─────────────── */
+/* 검색조건·도구 접기 버튼 — 좁은 화면에서만 보인다 */
+.tools-toggle { display: none; }
+
 /* 좁은 화면에서는 표를 가로로 밀지 않고, 한 거래를 두세 줄 카드처럼 접어서 보여준다 */
 @media (max-width: 700px) {
-  .ledger-wrap { overflow-x: hidden; max-height: calc(100vh - 260px); }
+  /* 탭이 잘리지 않도록 좁은 화면에서는 조금 작게 */
+  #tabs button { padding: 0.5rem 0.5rem; font-size: 0.94rem; }
+
+  /* 검색조건·도구는 접어두고 필요할 때만 편다 — 장부가 화면을 넓게 쓴다 */
+  .tools-toggle {
+    display: block;
+    width: 100%;
+    margin-bottom: 0.5rem;
+    padding: 0.5rem;
+    font-weight: 600;
+  }
+  #txCard > .section-head.tx-head { display: none; }
+  #txCard.tools-open > .section-head.tx-head { display: flex; }
+  #txCard .section-head.tx-head > * { flex: 1 1 auto; }
+  #txCard .section-head.tx-head .date-filter { flex: 1 1 40%; }
+
+  .ledger-wrap { overflow-x: hidden; max-height: calc(100vh - 210px); }
   .grid-table { font-size: 0.95rem; }
   .grid-table thead { display: none; }
 
@@ -809,16 +828,21 @@ body.easy .fab, body.easy .fab-help { display: none; }
   .grid-table td[data-f="supply"], .grid-table td[data-f="tax"] { display: none; }
 
   .grid-table td.chk { flex: 0 0 1.4rem; }
-  /* 버튼은 잔액 옆에 작게 붙여 줄 수를 줄인다 */
-  .grid-table td.actions { margin-left: auto; display: flex; gap: 0.25rem; }
+  /* 명세표·삭제 버튼은 첫 줄(날짜·상호)의 빈 오른쪽에 올려 한 줄을 아낀다 */
+  .grid-table td.chk { order: 1; }
+  .grid-table td[data-f="date"] { order: 2; }
+  .grid-table td[data-f="company"] { order: 3; }
+  .grid-table td.actions { order: 4; margin-left: auto; display: flex; gap: 0.25rem; }
+  .grid-table td[data-f="name"] { order: 5; }
+  .grid-table td[data-f="spec"] { order: 6; }
+  .grid-table td[data-f="qty"] { order: 7; }
+  .grid-table td[data-f="price"] { order: 8; }
+  .grid-table td[data-f="total"] { order: 9; }
+  .grid-table td[data-f="paid"] { order: 10; }
+  .grid-table td[data-f="balance"] { order: 11; }
   .grid-table td.actions button { padding: 0.3rem 0.5rem; font-size: 0.8rem; margin: 0; }
   .grid-table td.actions button[data-act="sheet"] { font-size: 0; padding: 0.3rem 0.55rem; }
   .grid-table td.actions button[data-act="sheet"]::after { content: '📄'; font-size: 1rem; }
-
-  /* 도구 버튼은 좁은 화면에서 아이콘만 */
-  .section-head .pin-label { display: none; }
-  #btnTxCsv { font-size: 0; padding: 0.45rem 0.6rem; }
-  #btnTxCsv::after { content: '📄'; font-size: 1rem; }
 
   /* 빈 줄은 어디를 눌러야 할지 보이도록 칸 이름을 흐리게 표시 */
   .grid-table tr.row-new td[data-f="date"]:empty::after,
@@ -849,6 +873,14 @@ body.easy .fab, body.easy .fab-help { display: none; }
   /* 편집 중인 칸은 넉넉하게 */
   .grid-table td.cell-editing { flex: 1 1 8rem; padding: 0; }
   .cell-input { font-size: 1rem; padding: 0.5rem 0.5rem; }
+}
+
+/* 손가락으로 쓰는 좁은 화면에서는 키보드 단축키 안내를 접어 장부를 넓게 쓴다 */
+@media (max-width: 700px) and (pointer: coarse) {
+  .sheet-hint span:not(:first-child) { display: none; }
+  .sheet-hint { font-size: 0.8rem; gap: 0.2rem 0.5rem; margin: 0.4rem 0 0; }
+  .summary { font-size: 0.8rem; margin-bottom: 0.35rem; }
+  .ver-footer { margin: 0.3rem 0 0.4rem; }
 }
 
 /* ─────────────── 모바일 ─────────────── */
