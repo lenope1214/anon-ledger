@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.15.5'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.16.0'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -16,6 +16,8 @@ const state = {
   txCompanyId: '',      // 거래관리 탭 필터 ('' = 전체)
   productsCache: {},    // 자동완성용 상호별 제품 캐시
   entryVat: 'separate', // 빠른 입력 행의 부가세 방식
+  entryKind: 'sale',    // 새로 적는 줄의 구분 (sale=판 것, purchase=산 것)
+  txKindFilter: '',     // 거래 필터: '' 전체 / 'sale' 매출만 / 'purchase' 매입만
   entryDate: '',        // 빠른 입력 행에서 마지막으로 쓴 날짜
   entryCompanyId: '',   // 빠른 입력 행에서 마지막으로 쓴 상호
   txFrom: '',           // 거래 필터: 시작일
@@ -26,10 +28,14 @@ state.easyMode = false; // 큰 글씨 간편 입력 (휴대폰·어르신용)
 try {
   const savedVat = localStorage.getItem('entryVat');
   if (savedVat && ['separate', 'included', 'none'].includes(savedVat)) state.entryVat = savedVat;
+  const savedKind = localStorage.getItem('entryKind');
+  if (savedKind === 'sale' || savedKind === 'purchase') state.entryKind = savedKind;
   state.easyMode = localStorage.getItem('easyMode') === '1';
 } catch (e) { /* localStorage 사용 불가 환경 */ }
 
 const VAT_LABEL = { separate: '부가세 별도', included: '부가세 포함', none: '부가세 없음' };
+const KIND_LABEL = { sale: '매출', purchase: '매입' };          // 판 것 / 산 것
+const KIND_ENTRY_LABEL = { sale: '🧾 판 것(매출)', purchase: '🛒 산 것(매입)' };
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -170,7 +176,9 @@ function drawCompanyRows() {
         <td>${esc(c.owner)}</td>
         <td>${esc(c.phone)}</td>
         <td class="num">${won(c.txCount)}건</td>
-        <td class="num ${c.outstanding > 0 ? 'warn' : c.outstanding < 0 ? 'neg' : ''}">${won(c.outstanding)}원</td>
+        <td class="num ${c.outstanding > 0 ? 'warn' : c.outstanding < 0 ? 'neg' : ''}">${won(c.outstanding)}원${
+          c.payable ? `<div class="sub">미지급 ${won(c.payable)}원</div>` : ''
+        }</td>
         <td class="actions">
           <button data-act="ledger" data-id="${c.id}" class="primary">원장</button>
           <button data-act="tx" data-id="${c.id}">거래보기</button>
@@ -255,7 +263,16 @@ async function renderCompanyLedger() {
 
   const inRange = (d) => (!ledgerView.from || d >= ledgerView.from) && (!ledgerView.to || d <= ledgerView.to);
   const all = [
-    ...txs.map((t) => ({ kind: 'tx', date: t.date, id: t.id, label: itemLabel(t), amount: t.total, paid: t.paid, tx: t })),
+    ...txs.map((t) => ({
+      kind: t.kind === 'purchase' ? 'buy' : 'tx',
+      date: t.date, id: t.id,
+      label: (t.kind === 'purchase' ? '🛒 매입 ' : '') + itemLabel(t),
+      amount: t.kind === 'purchase' ? 0 : t.total,
+      buy: t.kind === 'purchase' ? t.total : 0,
+      paid: t.kind === 'purchase' ? 0 : t.paid,
+      buyPaid: t.kind === 'purchase' ? t.paid : 0,
+      tx: t,
+    })),
     ...pays.map((x) => ({ kind: 'pay', date: x.date, id: x.id, label: '💰 입금 ' + (PAY_METHOD_LABEL[x.method] || '') + (x.memo ? ' · ' + x.memo : ''), amount: 0, paid: x.amount })),
   ].sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
 
@@ -268,10 +285,11 @@ async function renderCompanyLedger() {
   const body = rows
     .map((r) => {
       bal += r.amount - r.paid;
-      return `<tr class="${r.kind === 'pay' ? 'row-pay' : ''}">
+      return `<tr class="${r.kind === 'pay' ? 'row-pay' : r.kind === 'buy' ? 'row-buy' : ''}">
         <td>${esc(r.date)}</td>
         <td>${esc(r.label)}</td>
         <td class="num ${r.amount < 0 ? 'neg' : ''}">${r.amount ? won(r.amount) : ''}</td>
+        <td class="num">${r.buy ? won(r.buy) : ''}</td>
         <td class="num">${r.paid ? won(r.paid) : ''}</td>
         <td class="num ${bal > 0 ? 'warn' : bal < 0 ? 'neg' : ''}"><b>${won(bal)}</b></td>
       </tr>`;
@@ -279,6 +297,7 @@ async function renderCompanyLedger() {
     .join('');
 
   const sales = rows.reduce((s, r) => s + r.amount, 0);
+  const bought = rows.reduce((s, r) => s + (r.buy || 0), 0);
   const received = rows.reduce((s, r) => s + r.paid, 0);
 
   $('#main').innerHTML = `
@@ -297,16 +316,18 @@ async function renderCompanyLedger() {
           <h2 class="sheet-title">거 래 처 원 장</h2>
           <p class="sheet-date">${esc(c.name)}${c.owner ? ' (' + esc(c.owner) + ')' : ''} · 기간: ${esc(ledgerView.from || '처음')} ~ ${esc(ledgerView.to || '오늘')}</p>
           <table class="sheet-items ledger-doc">
-            <thead><tr><th>날짜</th><th>내용</th><th class="num">매출</th><th class="num">입금</th><th class="num">잔액(미수)</th></tr></thead>
+            <thead><tr><th>날짜</th><th>내용</th><th class="num">매출</th><th class="num">매입</th><th class="num">입금</th><th class="num">잔액(미수)</th></tr></thead>
             <tbody>
-              ${carry ? `<tr class="carry-row"><td>이월</td><td>이전 기간 미수금</td><td class="num"></td><td class="num"></td><td class="num"><b>${won(carry)}</b></td></tr>` : ''}
-              ${body || `<tr><td colspan="5" class="empty-cell">이 기간에 거래·입금 내역이 없습니다.</td></tr>`}
+              ${carry ? `<tr class="carry-row"><td>이월</td><td>이전 기간 미수금</td><td class="num"></td><td class="num"></td><td class="num"></td><td class="num"><b>${won(carry)}</b></td></tr>` : ''}
+              ${body || `<tr><td colspan="6" class="empty-cell">이 기간에 거래·입금 내역이 없습니다.</td></tr>`}
             </tbody>
             <tfoot>
-              <tr><th>합계</th><th></th><th class="num">${won(sales)}</th><th class="num">${won(received)}</th><th class="num"><b>${won(bal)}</b></th></tr>
+              <tr><th>합계</th><th></th><th class="num">${won(sales)}</th><th class="num">${won(bought)}</th><th class="num">${won(received)}</th><th class="num"><b>${won(bal)}</b></th></tr>
             </tfoot>
           </table>
-          <p class="sheet-memo">현재 미수금 <b>${won(bal)}원</b>${ledgerView.from || ledgerView.to ? ' (표시 기간 기준)' : ''}</p>
+          <p class="sheet-memo">현재 미수금 <b>${won(bal)}원</b>${ledgerView.from || ledgerView.to ? ' (표시 기간 기준)' : ''}${
+            bought ? ` · 이 거래처에서 산 것(매입) <b>${won(bought)}원</b>` : ''
+          }</p>
         </div>
       </div>
     </section>`;
@@ -356,29 +377,49 @@ async function renderReports() {
   if (!reportView.year || !years.includes(reportView.year)) reportView.year = years[0] || String(new Date().getFullYear());
   const y = reportView.year;
 
-  const MODES = { month: '월별 현황', company: '거래처별', product: '품목별' };
+  const MODES = { month: '월별 현황', profit: '손익(매출−매입)', company: '거래처별', product: '품목별' };
+  const isBuy = (t) => t.kind === 'purchase';
+  const sales = txs.filter((t) => !isBuy(t));   // 판 것
+  const buys = txs.filter(isBuy);               // 산 것
   let table = '';
 
-  if (reportView.mode === 'month') {
+  if (reportView.mode === 'profit') {
+    // 월별 매출 − 매입 = 이익 (누적 이익까지)
+    const rows = [];
+    let cum = 0;
+    for (let m = 1; m <= 12; m++) {
+      const key = `${y}-${String(m).padStart(2, '0')}`;
+      const sale = sales.filter((t) => t.date.startsWith(key)).reduce((s, t) => s + t.total, 0);
+      const buy = buys.filter((t) => t.date.startsWith(key)).reduce((s, t) => s + t.total, 0);
+      if (!sale && !buy) continue;
+      cum += sale - buy;
+      rows.push([`${m}월`, won(sale), won(buy), won(sale - buy), won(cum)]);
+    }
+    const saleSum = sales.filter((t) => t.date.startsWith(y)).reduce((s, t) => s + t.total, 0);
+    const buySum = buys.filter((t) => t.date.startsWith(y)).reduce((s, t) => s + t.total, 0);
+    table = rows.length
+      ? plainTable(['월', '매출', '매입', '이익', '누적 이익'], rows, ['합계', won(saleSum), won(buySum), won(saleSum - buySum), ''])
+      : '<p class="empty-cell">이 해에 기록된 내역이 없습니다.</p>';
+  } else if (reportView.mode === 'month') {
     // 1~12월 매출·입금·잔액
     const rows = [];
     let cumulative = 0;
     for (let m = 1; m <= 12; m++) {
       const key = `${y}-${String(m).padStart(2, '0')}`;
-      const sales = txs.filter((t) => t.date.startsWith(key)).reduce((s, t) => s + t.total, 0);
+      const monthTx = sales.filter((t) => t.date.startsWith(key));
+      const monthSales = monthTx.reduce((s, t) => s + t.total, 0);
       const received =
-        txs.filter((t) => t.date.startsWith(key)).reduce((s, t) => s + t.paid, 0) +
-        pays.filter((p) => p.date.startsWith(key)).reduce((s, p) => s + p.amount, 0);
-      const count = txs.filter((t) => t.date.startsWith(key)).length;
-      if (!sales && !received && !count) continue;
-      cumulative += sales - received;
-      rows.push({ label: `${m}월`, count, sales, received, balance: cumulative });
+        monthTx.reduce((s, t) => s + t.paid, 0) + pays.filter((p) => p.date.startsWith(key)).reduce((s, p) => s + p.amount, 0);
+      const count = monthTx.length;
+      if (!monthSales && !received && !count) continue;
+      cumulative += monthSales - received;
+      rows.push({ label: `${m}월`, count, sales: monthSales, received, balance: cumulative });
     }
     table = reportTable(['월', '건수', '매출', '받은 돈', '누적 미수'], rows, true);
   } else if (reportView.mode === 'company') {
     const rows = state.companies
       .map((c) => {
-        const ts = txs.filter((t) => t.companyId === c.id && t.date.startsWith(y));
+        const ts = sales.filter((t) => t.companyId === c.id && t.date.startsWith(y));
         const sales = ts.reduce((s, t) => s + t.total, 0);
         const received =
           ts.reduce((s, t) => s + t.paid, 0) +
@@ -390,7 +431,7 @@ async function renderReports() {
     table = reportTable(['상호', '건수', '매출', '받은 돈', '현재 미수'], rows);
   } else {
     const map = new Map();
-    txs
+    sales
       .filter((t) => t.date.startsWith(y))
       .forEach((t) =>
         t.items.forEach((it) => {
@@ -415,7 +456,11 @@ async function renderReports() {
         <button id="btnCsv">📄 엑셀(CSV) 내려받기</button>
       </div>
       <div class="table-wrap">${table}</div>
-      <p class="hint">${y}년 기준입니다. 표를 그대로 엑셀로 받아 세무사에게 전달할 수 있습니다.</p>
+      <p class="hint">${y}년 기준입니다.${
+        reportView.mode === 'profit'
+          ? ' 매출은 판 것, 매입은 산 것(지출)이며 이익 = 매출 − 매입입니다.'
+          : ' 매출 집계에는 매입(산 것) 줄이 들어가지 않습니다.'
+      } 표를 그대로 엑셀로 받아 세무사에게 전달할 수 있습니다.</p>
     </section>`;
 
   $('#rpYear').addEventListener('change', (e) => {
@@ -429,6 +474,19 @@ async function renderReports() {
     })
   );
   $('#btnCsv').addEventListener('click', () => downloadTableCsv(`${y}_${reportView.mode}`));
+}
+
+// 자유 형식 표 (첫 칸은 글자, 나머지는 숫자 오른쪽 정렬)
+function plainTable(heads, rows, footer) {
+  return `<table id="reportTable">
+    <thead><tr>${heads.map((h, i) => `<th class="${i ? 'num' : ''}">${esc(h)}</th>`).join('')}</tr></thead>
+    <tbody>
+      ${rows
+        .map((r) => `<tr>${r.map((v, i) => `<td class="${i ? 'num' : ''}">${i ? esc(v) : `<b>${esc(v)}</b>`}</td>`).join('')}</tr>`)
+        .join('')}
+    </tbody>
+    ${footer ? `<tfoot><tr>${footer.map((v, i) => `<th class="${i ? 'num' : ''}">${esc(v)}</th>`).join('')}</tr></tfoot>` : ''}
+  </table>`;
 }
 
 function reportTable(heads, rows, cumulative, isProduct) {
@@ -497,10 +555,14 @@ function exportTransactionsCsv() {
   const txRows = txCache
     .filter((t) => inRange(t.date))
     .filter((t) => !q || t.items.some((it) => it.name.toLowerCase().includes(q)))
+    .filter((t) => !state.txKindFilter || (t.kind === 'purchase' ? 'purchase' : 'sale') === state.txKindFilter)
     .flatMap((t) =>
-      t.items.map((it) => [t.date, t.companyName, '거래', it.name, it.spec, it.qty, it.price, it.supply, it.tax, it.supply + it.tax, '', t.memo])
+      t.items.map((it) => [
+        t.date, t.companyName, KIND_LABEL[t.kind === 'purchase' ? 'purchase' : 'sale'],
+        it.name, it.spec, it.qty, it.price, it.supply, it.tax, it.supply + it.tax, '', t.memo,
+      ])
     );
-  const payRows = (q ? [] : payCache.filter((x) => inRange(x.date))).map((x) => [
+  const payRows = (q || state.txKindFilter === 'purchase' ? [] : payCache.filter((x) => inRange(x.date))).map((x) => [
     x.date, x.companyName, '입금', PAY_METHOD_LABEL[x.method] || '', '', '', '', '', '', '', x.amount, x.memo,
   ]);
   const rows = [...txRows, ...payRows].sort((a, b) => String(a[0]).localeCompare(String(b[0])));
@@ -777,6 +839,14 @@ async function renderTransactions() {
         <input type="date" id="fTo" class="date-filter" value="${esc(state.txTo)}" title="종료일">
         <input type="search" id="fProduct" placeholder="품명 검색" value="${esc(state.txProductQuery)}">
         <button id="btnClearFilter" title="검색 조건 초기화">초기화</button>
+        <select id="kindFilter" class="vat-select" title="매출·매입 걸러 보기">
+          <option value="" ${state.txKindFilter === '' ? 'selected' : ''}>매출·매입 모두</option>
+          <option value="sale" ${state.txKindFilter === 'sale' ? 'selected' : ''}>매출만 보기</option>
+          <option value="purchase" ${state.txKindFilter === 'purchase' ? 'selected' : ''}>매입만 보기</option>
+        </select>
+        <select id="entryKind" class="vat-select" title="새로 적는 줄의 구분">
+          ${Object.entries(KIND_ENTRY_LABEL).map(([v, l]) => `<option value="${v}" ${v === state.entryKind ? 'selected' : ''}>${l}</option>`).join('')}
+        </select>
         <select id="entryVat" class="vat-select" title="새로 적는 줄의 부가세 방식">
           ${Object.entries(VAT_LABEL).map(([v, l]) => `<option value="${v}" ${v === state.entryVat ? 'selected' : ''}>${l}</option>`).join('')}
         </select>
@@ -789,7 +859,7 @@ async function renderTransactions() {
       <p class="summary"><span id="txSummary"></span><span id="selSummary" class="sel-summary"></span></p>
       <div class="table-wrap ledger-wrap">
         <table class="ledger-table grid-table">
-          <thead><tr><th class="chk"></th><th>날짜</th><th>상호</th><th>품명</th><th>규격</th><th class="num">수량</th><th class="num">단가</th><th class="num">공급가액</th><th class="num">합계</th><th class="num">세액</th><th class="num">입금</th><th class="num">잔액</th><th class="actions"></th></tr></thead>
+          <thead><tr><th class="chk"></th><th>구분</th><th>날짜</th><th>상호</th><th>품명</th><th>규격</th><th class="num">수량</th><th class="num">단가</th><th class="num">공급가액</th><th class="num">합계</th><th class="num">세액</th><th class="num">입금</th><th class="num">잔액</th><th class="actions"></th></tr></thead>
           <tbody id="txRows"></tbody>
         </table>
       </div>
@@ -842,6 +912,20 @@ async function renderTransactions() {
     $('#fTo').value = '';
     $('#fProduct').value = '';
     drawTxRows();
+  });
+  $('#kindFilter').addEventListener('change', (e) => {
+    state.txKindFilter = e.target.value;
+    drawTxRows();
+  });
+  $('#entryKind').addEventListener('change', (e) => {
+    state.entryKind = e.target.value === 'purchase' ? 'purchase' : 'sale';
+    try {
+      localStorage.setItem('entryKind', state.entryKind);
+    } catch (err) { /* 무시 */ }
+    // 아직 적지 않은 빈 줄들은 새 구분을 따라간다
+    gridRows.forEach((r, i) => {
+      if (r.kind === 'new') { r.txKind = state.entryKind; paintRow(i); }
+    });
   });
   $('#entryVat').addEventListener('change', (e) => {
     state.entryVat = e.target.value;
@@ -941,6 +1025,12 @@ async function renderTransactionsEasy() {
           <button type="button" id="xSign" class="sign-btn">＋ ↔ － 바꾸기</button>
         </div>
         <div class="easy-field">
+          <span class="easy-label">구분</span>
+          <select id="xKind">
+            ${Object.entries(KIND_ENTRY_LABEL).map(([v, l]) => `<option value="${v}" ${v === state.entryKind ? 'selected' : ''}>${l}</option>`).join('')}
+          </select>
+        </div>
+        <div class="easy-field">
           <span class="easy-label">부가세</span>
           <select id="xVat">
             ${Object.entries(VAT_LABEL).map(([v, l]) => `<option value="${v}" ${v === state.entryVat ? 'selected' : ''}>${l}</option>`).join('')}
@@ -1009,6 +1099,12 @@ async function renderTransactionsEasy() {
     easyRecompute();
   });
   $('#xPrice').addEventListener('input', easyRecompute);
+  $('#xKind').addEventListener('change', (e) => {
+    state.entryKind = e.target.value === 'purchase' ? 'purchase' : 'sale';
+    try {
+      localStorage.setItem('entryKind', state.entryKind);
+    } catch (err) { /* 무시 */ }
+  });
   $('#xVat').addEventListener('change', (e) => {
     state.entryVat = e.target.value;
     try {
@@ -1065,6 +1161,7 @@ async function saveEasyEntry() {
     companyId: Number(state.entryCompanyId) || 0,
     companyName,
     date: $('#xDate').value || today(),
+    kind: state.entryKind,
     vatMode: state.entryVat,
     items: [{ name, spec: '', qty: Number($('#xQty').value) || 0, price: Number($('#xPrice').value) || 0 }],
     paid: Number($('#xPaid').value) || 0,
@@ -1387,7 +1484,6 @@ function applyEntryCompany(c) {
 
 /* ─────────────── 엑셀식 셀 입력 그리드 ─────────────── */
 const GRID_COLS = ['date', 'company', 'name', 'spec', 'qty', 'price', 'paid'];
-const COL_INDEX = { date: 1, company: 2, name: 3, spec: 4, qty: 5, price: 6, supply: 7, total: 8, tax: 9, paid: 10, balance: 11 };
 const BLANK_ROWS = 20;              // 처음부터 깔아 두는 빈 줄
 const BLANK_STEP = 10;              // 아래로 내릴 때마다 더 만드는 빈 줄
 const MAX_BLANK_ROWS = 100;         // 빈 줄은 여기까지만 (끝없이 늘어나 느려지지 않게)
@@ -1397,13 +1493,14 @@ let gridEdit = null;                // { r, field, input }
 let gridSearching = false;          // 검색 시트를 여는 중이면 셀 편집을 유지한다
 const gridCursor = { r: 0, field: 'company' };
 
-const blankRow = () => ({ kind: 'new', date: '', companyName: '', name: '', spec: '', qty: '', price: '', paid: '' });
+const blankRow = () => ({ kind: 'new', txKind: state.entryKind, date: '', companyName: '', name: '', spec: '', qty: '', price: '', paid: '' });
 
 function rowFromTx(t) {
   const it = t.items[0];
   const multi = t.items.length > 1;
   return {
     kind: 'tx', id: t.id, tx: t, multi,
+    txKind: t.kind === 'purchase' ? 'purchase' : 'sale',
     date: t.date, companyId: t.companyId, companyName: t.companyName,
     name: it.name + (multi ? ` 외 ${t.items.length - 1}건` : ''), spec: multi ? '' : it.spec,
     qty: multi ? '' : it.qty, price: multi ? '' : it.price,
@@ -1446,8 +1543,14 @@ function rowHtml(row, i) {
   const checked = key && checkedTxIds.has(key);
   const num = (v, extra, f) => `<td class="num ${extra || ''}" data-f="${f}">${v === '' || v == null ? '' : won(v)}</td>`;
   const balance = isNew ? '' : (row.kind === 'pay' ? '' : row.total - row.paid);
-  return `<tr data-r="${i}" data-kind="${row.kind}" data-id="${row.id || ''}" class="${row.kind === 'pay' ? 'row-pay' : ''} ${checked ? 'row-checked' : ''} ${isNew ? 'row-new' : ''}">
+  const buy = row.kind !== 'pay' && row.txKind === 'purchase';
+  const kindCell =
+    row.kind === 'pay'
+      ? '<td class="kind-cell"><span class="kind-tag kind-pay">입금</span></td>'
+      : `<td class="kind-cell" data-f="kind" title="눌러서 매출↔매입 바꾸기"><span class="kind-tag ${buy ? 'kind-buy' : 'kind-sale'}">${buy ? '매입' : '매출'}</span></td>`;
+  return `<tr data-r="${i}" data-kind="${row.kind}" data-id="${row.id || ''}" class="${row.kind === 'pay' ? 'row-pay' : ''} ${buy ? 'row-buy' : ''} ${checked ? 'row-checked' : ''} ${isNew ? 'row-new' : ''}">
     <td class="chk">${key ? `<input type="checkbox" ${checked ? 'checked' : ''}>` : ''}</td>
+    ${kindCell}
     ${cell('date')}
     ${cell('company', 'cell-company')}
     ${cell('name')}
@@ -1461,7 +1564,7 @@ function rowHtml(row, i) {
     ${num(balance, balance > 0 ? 'warn' : balance < 0 ? 'neg' : '', 'balance')}
     <td class="actions">${
       row.kind === 'tx'
-        ? `<button data-act="sheet" data-id="${row.id}">명세표</button><button data-act="del" data-id="${row.id}" class="danger" title="삭제">✕</button>`
+        ? `${buy ? '' : `<button data-act="sheet" data-id="${row.id}">명세표</button>`}<button data-act="del" data-id="${row.id}" class="danger" title="삭제">✕</button>`
         : row.kind === 'pay'
         ? `<button data-act="pay-del" data-id="${row.id}" class="danger" title="삭제">✕</button>`
         : ''
@@ -1502,7 +1605,7 @@ function syncGridEndRow() {
     if (!end) {
       tbody.insertAdjacentHTML(
         'beforeend',
-        `<tr class="grid-end"><td colspan="13">빈 줄은 ${MAX_BLANK_ROWS}개까지 만듭니다 · 적은 줄을 저장하면 빈 줄이 다시 생깁니다</td></tr>`
+        `<tr class="grid-end"><td colspan="14">빈 줄은 ${MAX_BLANK_ROWS}개까지 만듭니다 · 적은 줄을 저장하면 빈 줄이 다시 생깁니다</td></tr>`
       );
     }
   } else if (end) {
@@ -1525,14 +1628,14 @@ async function drawTxRows() {
   const q = state.txProductQuery.trim().toLowerCase();
   let list = txCache.filter((t) => inRange(t.date));
   if (q) list = list.filter((t) => t.items.some((it) => it.name.toLowerCase().includes(q)));
-  const payList = q ? [] : payCache.filter((x) => inRange(x.date));
+  if (state.txKindFilter) {
+    const want = state.txKindFilter;
+    list = list.filter((t) => (t.kind === 'purchase' ? 'purchase' : 'sale') === want);
+  }
+  // 매입만 볼 때는 입금(수금) 줄을 섞지 않는다
+  const payList = q || state.txKindFilter === 'purchase' ? [] : payCache.filter((x) => inRange(x.date));
 
-  const total = list.reduce((s, t) => s + t.total, 0);
-  const received = list.reduce((s, t) => s + t.paid, 0) + payList.reduce((s, x) => s + x.amount, 0);
-  $('#txSummary').textContent =
-    `거래 ${list.length}건 · 합계 ${won(total)}원 · 받은 돈 ${won(received)}원` +
-    (payList.length ? ` (입금 ${payList.length}건 포함)` : '') +
-    ` · 미수 ${won(total - received)}원`;
+  $('#txSummary').textContent = summaryText(list.map(rowFromTx), payList.map((x) => ({ paid: x.amount })));
 
   // 저장된 줄을 날짜순으로 깔고, 그 아래에 빈 줄을 이어 붙인다
   gridRows = [
@@ -1576,8 +1679,19 @@ function bindGridEvents(tbody) {
       updateSelSummary();
       return;
     }
+    if (td.classList.contains('kind-cell') && td.dataset.f === 'kind') return toggleRowKind(i);
     if (td.dataset.edit) await openCellEditor(i, td.dataset.f);
   };
+}
+
+// 매출 ↔ 매입 뒤집기 (저장된 줄은 바로 다시 저장)
+async function toggleRowKind(r) {
+  const row = gridRows[r];
+  if (!row || row.kind === 'pay') return;
+  row.txKind = row.txKind === 'purchase' ? 'sale' : 'purchase';
+  paintRow(r);
+  if (row.kind === 'tx') await saveExistingRow(row, r);
+  else updateSummaryOnly();
 }
 
 async function handleRowAction(btn) {
@@ -1700,10 +1814,12 @@ async function saveExistingRow(row, r) {
         : [{ name: row.name, spec: row.spec, qty: Number(row.qty) || 0, price: Number(row.price) || 0 }];
       const saved = await api('PUT', '/api/transactions/' + row.id, {
         companyId: row.companyId, companyName: row.companyName,
-        date: row.date, vatMode: row.tx.vatMode, items,
+        date: row.date, kind: row.txKind === 'purchase' ? 'purchase' : 'sale',
+        vatMode: row.tx.vatMode, items,
         paid: Number(row.paid) || 0, memo: row.tx.memo,
       });
       Object.assign(row, rowFromTx(Object.assign({ companyName: row.companyName }, saved)));
+      row.txKind = saved.kind === 'purchase' ? 'purchase' : 'sale';
     }
     toast('고쳤습니다.');
     await refreshCompanies();
@@ -1729,6 +1845,7 @@ async function saveNewRowIfReady(r) {
       companyId: row.companyId || 0,
       companyName: row.companyName,
       date: row.date || today(),
+      kind: row.txKind === 'purchase' ? 'purchase' : 'sale',
       vatMode: state.entryVat,
       items: [{ name: row.name, spec: row.spec, qty: Number(row.qty) || 1, price: Number(row.price) || 0 }],
       paid: Number(row.paid) || 0,
@@ -1763,19 +1880,31 @@ function fillNewRowFromLast(row) {
   return true;
 }
 
+// 화면에 보이는 줄로 매출·매입·이익과 미수를 요약한다
+function summaryText(txRows, payRows) {
+  const sales = txRows.filter((r) => r.txKind !== 'purchase');
+  const buys = txRows.filter((r) => r.txKind === 'purchase');
+  const saleTotal = sales.reduce((s, r) => s + r.total, 0);
+  const buyTotal = buys.reduce((s, r) => s + r.total, 0);
+  const received =
+    sales.reduce((s, r) => s + (Number(r.paid) || 0), 0) + payRows.reduce((s, r) => s + (Number(r.paid) || 0), 0);
+  const parts = [`거래 ${txRows.length}건`];
+  if (saleTotal || !buyTotal) parts.push(`매출 ${won(saleTotal)}원`);
+  if (buyTotal) parts.push(`매입 ${won(buyTotal)}원`);
+  if (saleTotal && buyTotal) parts.push(`이익 ${won(saleTotal - buyTotal)}원`);
+  if (saleTotal) {
+    parts.push(`받은 돈 ${won(received)}원` + (payRows.length ? ` (입금 ${payRows.length}건 포함)` : ''));
+    if (saleTotal - received) parts.push(`미수 ${won(saleTotal - received)}원`);
+  }
+  const unpaidBuy = buyTotal - buys.reduce((s, r) => s + (Number(r.paid) || 0), 0);
+  if (unpaidBuy) parts.push(`미지급 ${won(unpaidBuy)}원`);
+  return parts.join(' · ');
+}
+
 function updateSummaryOnly() {
   const el = $('#txSummary');
   if (!el) return;
-  const rows = gridRows.filter((r) => r.kind !== 'new');
-  const total = rows.filter((r) => r.kind === 'tx').reduce((s, r) => s + r.total, 0);
-  const received =
-    rows.filter((r) => r.kind === 'tx').reduce((s, r) => s + (Number(r.paid) || 0), 0) +
-    rows.filter((r) => r.kind === 'pay').reduce((s, r) => s + (Number(r.paid) || 0), 0);
-  const payCount = rows.filter((r) => r.kind === 'pay').length;
-  el.textContent =
-    `거래 ${rows.filter((r) => r.kind === 'tx').length}건 · 합계 ${won(total)}원 · 받은 돈 ${won(received)}원` +
-    (payCount ? ` (입금 ${payCount}건 포함)` : '') +
-    ` · 미수 ${won(total - received)}원`;
+  el.textContent = summaryText(gridRows.filter((r) => r.kind === 'tx'), gridRows.filter((r) => r.kind === 'pay'));
 }
 
 /* ── 셀 사이 이동 ── */
@@ -2382,6 +2511,16 @@ async function openTxForm(tx) {
           </select>
         </label>
         <label>거래일자<input name="date" type="date" value="${esc(tx ? tx.date : today())}"></label>
+        <label>구분
+          <select name="kind">
+            ${Object.entries(KIND_ENTRY_LABEL)
+              .map(([v, l]) => {
+                const cur = tx ? (tx.kind === 'purchase' ? 'purchase' : 'sale') : state.entryKind;
+                return `<option value="${v}" ${v === cur ? 'selected' : ''}>${l}</option>`;
+              })
+              .join('')}
+          </select>
+        </label>
         <label>부가세
           <select name="vatMode">
             ${Object.entries(VAT_LABEL).map(([v, l]) => `<option value="${v}" ${tx && tx.vatMode === v ? 'selected' : ''}>${l}</option>`).join('')}
@@ -2485,6 +2624,7 @@ async function openTxForm(tx) {
     const body = {
       companyId: Number(form.companyId.value),
       date: form.date.value,
+      kind: form.kind.value === 'purchase' ? 'purchase' : 'sale',
       vatMode: form.vatMode.value,
       items,
       paid: Number(form.paid.value) || 0,
