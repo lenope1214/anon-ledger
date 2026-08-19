@@ -204,7 +204,9 @@ form label input, form label select { margin-top: 0.2rem; font-weight: 400; }
 /* 행 체크 */
 .chk { width: 2rem; text-align: center; }
 .chk input { width: auto; cursor: pointer; }
-#txRows tr[data-id] { cursor: pointer; }
+/* 포인터는 실제로 눌러서 되는 곳에만: 입력 칸(cell)·체크 칸·버튼.
+   자동 계산 칸은 기본 화살표라 눌러도 되는 칸과 구분된다 */
+#txRows td.chk:has(input) { cursor: pointer; }
 #txRows tr.row-checked td { background: #fefce8; }
 #txRows tr.row-pointer { outline: 2px solid var(--accent); outline-offset: -2px; }
 .sel-summary { color: var(--accent-dark); font-weight: 700; }
