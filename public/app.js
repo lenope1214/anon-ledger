@@ -1850,6 +1850,11 @@ function onCellKey(e) {
     e.preventDefault();
     const v = Number(input.value) || 0;
     if (v !== 0) input.value = -v;
+  } else if (e.key === 'Escape' && (field === 'company' || field === 'name')) {
+    // 한 번의 ESC로 바로 검색 — 한글을 조합하는 중이어도 적은 글자를 그대로 가져간다
+    e.preventDefault();
+    e.stopPropagation();
+    openContextSearch();
   }
 }
 
@@ -2079,7 +2084,10 @@ const COMPANY_FIELDS = [
 function ssRender() {
   const box = $('#ssResults');
   if (!ss.items.length) {
-    box.innerHTML = '<p class="empty-cell">검색 결과가 없습니다.</p>';
+    const q = $('#ssInput').value.trim();
+    box.innerHTML = q
+      ? `<p class="empty-cell">'${esc(q)}' 검색 결과가 없습니다 · <b>Enter</b>를 누르면 적은 그대로 칸에 넣습니다 (저장할 때 새로 등록)</p>`
+      : '<p class="empty-cell">검색 결과가 없습니다.</p>';
     return;
   }
   if (ss.tab === 'company') {
@@ -2167,6 +2175,38 @@ async function saveCompanyField(inp) {
   }
 }
 
+// 검색 결과가 없을 때 Enter: 적은 글자를 그대로 칸에 넣는다 (저장할 때 자동 등록)
+function ssApplyText() {
+  const text = $('#ssInput').value.trim();
+  if (!text) return closeSearchSheet();
+  if (!state.easyMode && gridEdit) {
+    const r = gridEdit.r;
+    const row = gridRows[r];
+    gridSearching = false;
+    gridEdit = null; // 편집 중이던 값 대신 검색창에 적은 값을 쓴다
+    closeSearchSheet();
+    if (ss.tab === 'company') {
+      row.companyName = text;
+      row.companyId = 0; // 저장할 때 이 이름으로 자동 등록된다
+      paintRow(r);
+      if (row.kind === 'tx' || row.kind === 'pay') saveExistingRow(row, r);
+      return openCellEditor(r, editableFields(row).includes('name') ? 'name' : 'date');
+    }
+    row.name = text;
+    paintRow(r);
+    if (row.kind === 'tx') saveExistingRow(row, r);
+    return openCellEditor(r, 'spec');
+  }
+  // 큰 글씨 모드: 해당 입력칸에 그대로 넣는다
+  const el = ss.tab === 'company' ? $('#xCompany') : $('#xName');
+  closeSearchSheet();
+  if (el) {
+    el.value = text;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.focus();
+  }
+}
+
 function ssPick(i) {
   const it = ss.items[i];
   if (!it) return;
@@ -2241,7 +2281,8 @@ $('#ssInput').addEventListener('keydown', (e) => {
     ssRender();
   } else if (e.key === 'Enter') {
     e.preventDefault();
-    ssPick(ss.sel);
+    if (ss.items.length) ssPick(ss.sel);
+    else ssApplyText(); // 결과가 없으면 적은 글자를 그대로 칸에 넣는다
   }
 });
 
