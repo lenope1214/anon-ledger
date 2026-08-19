@@ -503,6 +503,16 @@ body.sheet-open .fab-help { display: none; }
   background: var(--card);
   z-index: 2;
 }
+.ss-scope {
+  color: var(--sub);
+  font-size: 0.85rem;
+  padding: 0.2rem 0.1rem 0.5rem;
+  display: flex;
+  gap: 0.5rem;
+  align-items: baseline;
+}
+.ss-scope b { color: var(--text); }
+
 .ss-row { cursor: pointer; }
 .ss-row.sel, .ss-row:hover { background: #eff6ff; }
 .ss-row input { padding: 0.35rem 0.45rem; font-size: 0.86rem; }
