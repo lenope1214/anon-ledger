@@ -792,8 +792,8 @@ async function renderTransactions() {
             <tr class="entry-row">
               <td class="chk"></td>
               <td><input type="date" id="eDate" value="${esc(state.entryDate || today())}"></td>
-              <td><input id="eCompany" placeholder="상호 입력·검색" autocomplete="off"></td>
-              <td><input id="eName" placeholder="품명 (비우면 이전 품목)" autocomplete="off"></td>
+              <td><input id="eCompany" placeholder="상호 (ESC=찾기)" autocomplete="off"></td>
+              <td><input id="eName" placeholder="품명 (ESC=찾기)" autocomplete="off"></td>
               <td><input id="eSpec" placeholder="규격"></td>
               <td><input id="eQty" type="number" inputmode="decimal" step="any" value="1"></td>
               <td><input id="ePrice" type="number" inputmode="numeric" placeholder="단가"></td>
@@ -808,12 +808,13 @@ async function renderTransactions() {
         </table>
       </div>
       <p class="hint sheet-hint">
-        <span><b>Enter</b> 저장</span>
-        <span><b>품명 비우고 Enter</b> 이전 품목 그대로</span>
+        <span><b>Enter</b> 다음 칸 · 마지막 칸에서 저장</span>
+        <span><b>← →</b> 칸 이동</span>
+        <span><b>품명 비우면</b> 이전 품목 그대로</span>
         <span><b>=</b> 부호 토글 · 연속 체크</span>
         <span><b>−</b> 건너뛰기</span>
         <span><b>Backspace</b> 되돌리기</span>
-        <span><b>ESC</b> 빠른 검색</span>
+        <span><b>ESC</b> 그 칸으로 검색 (상호/품명)</span>
         <span><b>F2</b> 커서 고정</span>
         <button type="button" id="btnHelpInline" class="link-btn">자세한 사용법 보기</button>
       </p>
@@ -827,16 +828,7 @@ async function renderTransactions() {
   if (preferred) setEntryCompany(preferred);
   else state.entryCompanyId = '';
 
-  attachSearchDropdown(eCompany, {
-    minChars: 0,           // 클릭만 해도 전체 상호 목록이 뜨고, 타자로 좁혀진다
-    enterPicksFirst: true, // Enter로 맨 위 힌트 바로 선택
-    getItems: async (q) => state.companies.filter((c) => !q || c.name.toLowerCase().includes(q)),
-    itemHtml: (c) => `<b>${esc(c.name)}</b>${c.owner ? `<span class="sub">${esc(c.owner)}</span>` : ''}`,
-    onPick: (c) => {
-      setEntryCompany(c);
-      $('#eName').focus();
-    },
-  });
+  // 입력 중에는 목록을 띄우지 않는다 — 찾을 땐 ESC(빠른 검색)를 쓴다
   eCompany.addEventListener('input', () => {
     state.entryCompanyId = ''; // 글자를 고치면 다시 선택해야 함
   });
@@ -903,14 +895,6 @@ async function renderTransactions() {
       }
     }, 180); // 자동완성 힌트를 고르는 중이면 건너뛰도록 잠깐 기다린다
   });
-  attachProductAutocomplete($('#eName'), () => state.entryCompanyId, (p) => {
-    $('#eName').value = p.name;
-    $('#eSpec').value = p.spec;
-    $('#ePrice').value = p.price;
-    recomputeEntry();
-    $('#eQty').focus();
-    $('#eQty').select();
-  });
   $('#btnQuickSearch').addEventListener('click', toggleSearchSheet);
   $('#btnHelp').addEventListener('click', startTour);
   $('#btnHelpInline').addEventListener('click', startTour);
@@ -919,10 +903,9 @@ async function renderTransactions() {
   $('#btnPin').addEventListener('mousedown', (e) => e.preventDefault());
   $('#btnPin').addEventListener('click', () => togglePin(document.activeElement));
   $('.entry-row').addEventListener('keydown', (e) => {
-    if (e.target.tagName !== 'INPUT') return;
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      saveEntry();
+    if (e.target.tagName !== 'INPUT' && e.target.tagName !== 'SELECT') return;
+    if (e.key === 'Enter' || e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
+      handleEntryKeys(e, saveEntry);
     } else if (e.key === '=') {
       // '=' 키로 단가(합계) 부호 토글: 8000 ⇄ -8000 (반품·차감 입력용)
       e.preventDefault();
@@ -1017,24 +1000,9 @@ async function renderTransactionsEasy() {
   const preferred = state.companies.find((c) => String(c.id) === String(state.entryCompanyId));
   if (preferred) xCompany.value = preferred.name;
 
-  attachSearchDropdown(xCompany, {
-    minChars: 0,
-    enterPicksFirst: true,
-    getItems: async (q) => state.companies.filter((c) => !q || c.name.toLowerCase().includes(q)),
-    itemHtml: (c) => `<b>${esc(c.name)}</b>${c.owner ? `<span class="sub">${esc(c.owner)}</span>` : ''}`,
-    onPick: (c) => {
-      state.entryCompanyId = String(c.id);
-      xCompany.value = c.name;
-      $('#xName').focus();
-    },
-  });
+  // 입력 중에는 목록을 띄우지 않는다 — 찾을 땐 ESC(또는 🔍 버튼)를 쓴다
   xCompany.addEventListener('input', () => {
     state.entryCompanyId = ''; // 이름을 고치면 새 상호로 취급 (없으면 자동 등록)
-  });
-  attachProductAutocomplete($('#xName'), () => state.entryCompanyId, (p) => {
-    $('#xName').value = p.name;
-    $('#xPrice').value = p.price;
-    easyRecompute();
   });
 
   $('#xSame').addEventListener('click', () => {
@@ -1090,6 +1058,9 @@ async function renderTransactionsEasy() {
   $('#easyForm').addEventListener('submit', (e) => {
     e.preventDefault();
     saveEasyEntry();
+  });
+  $('#easyForm').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === 'ArrowRight' || e.key === 'ArrowLeft') handleEntryKeys(e, saveEasyEntry);
   });
 
   easyRecompute();
@@ -1350,6 +1321,52 @@ document.addEventListener('keydown', (e) => {
   togglePin(document.activeElement);
 });
 
+/* ─────────────── 입력칸 이동 (Enter / 방향키) ─────────────── */
+const SHEET_FIELDS = ['eDate', 'eCompany', 'eName', 'eSpec', 'eQty', 'ePrice', 'ePaid'];
+const EASY_FIELDS = ['xDate', 'xCompany', 'xName', 'xQty', 'xPrice', 'xVat', 'xPaid'];
+const entryFields = () => (state.easyMode ? EASY_FIELDS : SHEET_FIELDS);
+
+function moveEntryFocus(dir) {
+  const fields = entryFields();
+  const i = fields.indexOf(document.activeElement && document.activeElement.id);
+  if (i < 0) return false;
+  const el = $('#' + fields[i + dir]);
+  if (!el) return false;
+  el.focus();
+  if (el.select) el.select();
+  return true;
+}
+
+const isLastEntryField = (el) => {
+  const fields = entryFields();
+  return el && el.id === fields[fields.length - 1];
+};
+
+// 글자를 고치는 중인지 판단 — 커서가 끝(또는 처음)이 아니면 방향키는 글자 이동에 쓴다
+function caretAtEdge(el, dir) {
+  if (!el || el.tagName !== 'INPUT') return true;
+  if (['number', 'date', 'time'].includes(el.type)) return true; // 이런 칸은 바로 이동
+  const len = el.value.length;
+  const pos = el.selectionStart == null ? len : el.selectionStart;
+  const end = el.selectionEnd == null ? len : el.selectionEnd;
+  return dir > 0 ? pos === len && end === len : pos === 0 && end === 0;
+}
+
+// 입력 행/폼 안에서의 키 처리 (Enter: 다음 칸 → 마지막 칸에서 저장, ←→: 칸 이동)
+function handleEntryKeys(e, save) {
+  const el = e.target;
+  if (!entryFields().includes(el.id)) return;
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    if (isLastEntryField(el)) save();
+    else moveEntryFocus(1);
+  } else if (e.key === 'ArrowRight' && caretAtEdge(el, 1)) {
+    if (moveEntryFocus(1)) e.preventDefault();
+  } else if (e.key === 'ArrowLeft' && caretAtEdge(el, -1)) {
+    if (moveEntryFocus(-1)) e.preventDefault();
+  }
+}
+
 /* ─────────────── 이전 품목 그대로 적기 ─────────────── */
 // 품명을 비운 채 넘어가거나 저장하면 직전에 적은 품목을 그대로 불러온다.
 // 선택된 상호의 마지막 거래를 우선 쓰고, 없으면 전체 마지막 거래를 쓴다.
@@ -1380,7 +1397,7 @@ function scrollSheetToBottom() {
 // 입력 행의 상호를 설정한다 (렌더 여부와 무관하게 상태를 갱신)
 function applyEntryCompany(c) {
   state.entryCompanyId = String(c.id);
-  const el = $('#eCompany');
+  const el = $('#eCompany') || $('#xCompany');
   if (el) el.value = c.name;
 }
 
@@ -1703,13 +1720,25 @@ function searchSheetOpen() {
   return !$('#searchSheet').classList.contains('hidden');
 }
 
-function openSearchSheet() {
+function openSearchSheet(tab, query) {
   $('#searchSheet').classList.remove('hidden');
   document.body.classList.add('sheet-open'); // 본문을 패널 높이만큼 위로 밀어 올림
-  $('#ssInput').value = '';
+  if (tab) ssSetTabOnly(tab);
+  $('#ssInput').value = query || '';
   ssUpdate();
   $('#ssInput').focus();
+  $('#ssInput').select();
   scrollSheetToBottom(); // 입력 행이 패널 위에 계속 보이도록
+}
+
+// 커서가 있던 칸에 맞춰 검색 대상과 검색어를 정한다
+function openContextSearch() {
+  const el = document.activeElement;
+  const id = el && el.id;
+  const value = el && typeof el.value === 'string' ? el.value.trim() : '';
+  if (id === 'eCompany' || id === 'xCompany') return openSearchSheet('company', value);
+  if (id === 'eName' || id === 'xName') return openSearchSheet('product', value);
+  openSearchSheet(null, '');
 }
 
 function closeSearchSheet() {
@@ -1720,35 +1749,53 @@ function closeSearchSheet() {
 
 function toggleSearchSheet() {
   if (searchSheetOpen()) closeSearchSheet();
-  else openSearchSheet();
+  else openContextSearch();
 }
 
-function ssSetTab(tab) {
+// 탭만 바꾸고 검색은 호출한 쪽에서 실행한다
+function ssSetTabOnly(tab) {
   ss.tab = tab;
   $('#ssTabCompany').classList.toggle('active', tab === 'company');
   $('#ssTabProduct').classList.toggle('active', tab === 'product');
   $('#ssInput').placeholder = tab === 'company' ? '상호명·대표자 검색 (아래에서 바로 수정 가능)' : '품명·규격 검색 (전체 상호)';
+}
+
+function ssSetTab(tab) {
+  ssSetTabOnly(tab);
   ssUpdate();
   $('#ssInput').focus();
+}
+
+// 검색어로 시작하는 항목을 위로 올린다 ('한' → 한식뷔페, 한빛… 먼저)
+function sortByPrefix(list, q) {
+  if (!q) return list.slice().sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+  return list.slice().sort((a, b) => {
+    const ap = a.name.toLowerCase().startsWith(q) ? 0 : 1;
+    const bp = b.name.toLowerCase().startsWith(q) ? 0 : 1;
+    return ap - bp || a.name.localeCompare(b.name, 'ko');
+  });
 }
 
 async function ssUpdate() {
   const q = $('#ssInput').value.trim().toLowerCase();
   if (ss.tab === 'company') {
-    ss.items = state.companies
-      .filter((c) => !q || c.name.toLowerCase().includes(q) || (c.owner || '').toLowerCase().includes(q))
-      .slice(0, 50);
+    ss.items = sortByPrefix(
+      state.companies.filter((c) => !q || c.name.toLowerCase().includes(q) || (c.owner || '').toLowerCase().includes(q)),
+      q
+    ).slice(0, 50);
   } else {
     const names = new Map(state.companies.map((c) => [c.id, c.name]));
     let all = [];
     try {
       all = await getAllProducts();
     } catch (e) { /* 미로그인 등 */ }
-    ss.items = all
-      .filter((p) => names.has(p.companyId))
-      .filter((p) => !q || p.name.toLowerCase().includes(q) || (p.spec || '').toLowerCase().includes(q))
-      .map((p) => Object.assign({}, p, { companyName: names.get(p.companyId) }))
-      .slice(0, 50);
+    ss.items = sortByPrefix(
+      all
+        .filter((p) => names.has(p.companyId))
+        .filter((p) => !q || p.name.toLowerCase().includes(q) || (p.spec || '').toLowerCase().includes(q))
+        .map((p) => Object.assign({}, p, { companyName: names.get(p.companyId) })),
+      q
+    ).slice(0, 50);
   }
   ss.sel = 0;
   ssRender();
@@ -1856,27 +1903,27 @@ async function saveCompanyField(inp) {
 function ssPick(i) {
   const it = ss.items[i];
   if (!it) return;
+  const nameEl = $('#eName') || $('#xName');
+  const specEl = $('#eSpec');
+  const priceEl = $('#ePrice') || $('#xPrice');
+  const qtyEl = $('#eQty') || $('#xQty');
   if (ss.tab === 'company') {
     applyEntryCompany(it);
     closeSearchSheet();
-    const name = $('#eName');
-    if (name) name.focus();
-  } else {
-    const c = state.companies.find((x) => x.id === it.companyId);
-    if (c) applyEntryCompany(c); // 제품을 고르면 그 제품의 상호까지 함께 적용
-    const name = $('#eName');
-    const spec = $('#eSpec');
-    const price = $('#ePrice');
-    if (name) name.value = it.name;
-    if (spec) spec.value = it.spec;
-    if (price) price.value = it.price;
-    recomputeEntry();
-    closeSearchSheet();
-    const qty = $('#eQty');
-    if (qty) {
-      qty.focus();
-      qty.select();
-    }
+    if (nameEl) nameEl.focus();
+    return;
+  }
+  const c = state.companies.find((x) => x.id === it.companyId);
+  if (c) applyEntryCompany(c); // 제품을 고르면 그 제품의 상호까지 함께 적용
+  if (nameEl) nameEl.value = it.name;
+  if (specEl) specEl.value = it.spec;
+  if (priceEl) priceEl.value = it.price;
+  if (state.easyMode) easyRecompute();
+  else recomputeEntry();
+  closeSearchSheet();
+  if (qtyEl) {
+    qtyEl.focus();
+    qtyEl.select();
   }
 }
 
@@ -1909,7 +1956,8 @@ document.addEventListener('keydown', (e) => {
   if (!$('#modal').classList.contains('hidden')) return;
   if (document.body.classList.contains('printing')) return;
   e.preventDefault();
-  toggleSearchSheet();
+  if (searchSheetOpen()) closeSearchSheet();
+  else openContextSearch();
 });
 
 /* ── 거래 입력/수정 폼 ── */
@@ -2464,13 +2512,13 @@ const TOUR_STEPS = [
   {
     sel: '#eCompany',
     title: '상호는 그냥 적으면 등록됩니다',
-    body: '클릭하면 등록된 상호 목록이 뜨고, 몇 글자만 쳐도 찾아줍니다. 처음 보는 상호명을 적으면 자동으로 새로 등록되니 미리 만들어 둘 필요가 없습니다. 한 번 정하면 계속 유지됩니다.',
+    body: '상호명을 그대로 적으면 됩니다. 처음 보는 이름이면 자동으로 새로 등록되니 미리 만들어 둘 필요가 없습니다. 찾아서 고르고 싶으면 몇 글자만 적고 ESC를 누르세요 — 그 글자로 시작하는 상호가 아래에 뜹니다. 한 번 정하면 계속 유지됩니다.',
     pos: 'top',
   },
   {
     sel: '#eName',
     title: '품명도 자동으로 쌓입니다',
-    body: '몇 글자 치면 그 상호에서 팔던 제품이 힌트로 뜹니다. 골라 쓰면 규격·단가가 자동으로 채워집니다. 새 품명은 적는 순간 제품으로 등록되고, 단가를 바꿔 적으면 최신 단가로 갱신됩니다. 같은 걸 또 적을 땐 품명을 비운 채 Enter만 눌러도 직전 품목이 그대로 들어갑니다.',
+    body: '품명을 적으면 그대로 제품으로 등록되고, 단가를 바꿔 적으면 최신 단가로 갱신됩니다. 예전에 팔던 걸 찾을 땐 몇 글자 적고 ESC를 누르세요 — 고르면 규격·단가까지 채워집니다. 같은 걸 또 적을 땐 품명을 비워두면 직전 품목이 그대로 들어갑니다.',
     pos: 'top',
   },
   {
@@ -2495,7 +2543,7 @@ const TOUR_STEPS = [
   {
     sel: '#btnQuickSearch',
     title: 'ESC 로 빠른 검색',
-    body: '언제든 ESC(또는 이 버튼)를 누르면 아래에서 검색창이 올라옵니다. 상호·제품을 찾아 고르면 입력 줄에 바로 채워집니다.',
+    body: '커서가 상호 칸에 있으면 상호만, 품명 칸에 있으면 제품만 찾아줍니다. 칸에 적어둔 글자가 검색어로 들어가고, 그 글자로 시작하는 것부터 보여줍니다. 고르면 입력 줄에 바로 채워집니다.',
     pos: 'left',
   },
   {
