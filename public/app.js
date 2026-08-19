@@ -1,5 +1,7 @@
 'use strict';
 
+const APP_VERSION = '1.15.2'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
 const $$ = (sel, el = document) => Array.from(el.querySelectorAll(sel));
@@ -3051,7 +3053,20 @@ $('#btnLogout').addEventListener('click', async () => {
 
 (async function init() {
   api('GET', '/api/version')
-    .then((v) => { $('#verFooter').textContent = `거래장부 v${v.version} · ${v.commit}`; })
+    .then((v) => {
+      $('#verFooter').textContent = `거래장부 v${v.version} · ${v.commit}`;
+      // 서버는 새 버전인데 화면 코드가 예전 것이면(캐시) 한 번 자동 새로고침한다
+      if (v.version !== APP_VERSION) {
+        if (!sessionStorage.getItem('verReloaded')) {
+          sessionStorage.setItem('verReloaded', '1');
+          location.reload();
+        } else {
+          $('#verFooter').textContent += ` · ⚠ 화면은 v${APP_VERSION} — Ctrl+Shift+R로 새로고침하세요`;
+        }
+      } else {
+        sessionStorage.removeItem('verReloaded');
+      }
+    })
     .catch(() => {});
   const hash = location.hash.slice(1);
   if (['companies', 'products', 'transactions', 'reports', 'settings', 'admin'].includes(hash)) {
