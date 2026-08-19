@@ -1401,14 +1401,17 @@ function cellText(row, field) {
   return v === '' || v == null ? '' : won(v);
 }
 
+const CELL_PH = { date: '날짜', company: '상호', name: '품명', spec: '규격', qty: '수량', price: '단가', paid: '입금' };
+
 function rowHtml(row, i) {
   const isNew = row.kind === 'new';
   const calc = isNew ? newRowCalc(row) : row;
   const editable = (f) => (row.kind === 'tx' && row.multi && ['name', 'spec', 'qty', 'price'].includes(f) ? '' : ' data-edit="1"');
-  const cell = (f, cls) => `<td class="${cls || ''}"${editable(f)} data-f="${f}">${esc(cellText(row, f))}</td>`;
+  const cell = (f, cls) =>
+    `<td class="${cls || ''}"${editable(f)} data-f="${f}" data-ph="${CELL_PH[f] || ''}">${esc(cellText(row, f))}</td>`;
   const key = row.kind === 'new' ? '' : (row.kind === 'pay' ? 'p' : 't') + row.id;
   const checked = key && checkedTxIds.has(key);
-  const num = (v, extra) => `<td class="num ${extra || ''}">${v === '' || v == null ? '' : won(v)}</td>`;
+  const num = (v, extra, f) => `<td class="num ${extra || ''}" data-f="${f}">${v === '' || v == null ? '' : won(v)}</td>`;
   const balance = isNew ? '' : (row.kind === 'pay' ? '' : row.total - row.paid);
   return `<tr data-r="${i}" data-kind="${row.kind}" data-id="${row.id || ''}" class="${row.kind === 'pay' ? 'row-pay' : ''} ${checked ? 'row-checked' : ''} ${isNew ? 'row-new' : ''}">
     <td class="chk">${key ? `<input type="checkbox" ${checked ? 'checked' : ''}>` : ''}</td>
@@ -1418,11 +1421,11 @@ function rowHtml(row, i) {
     ${cell('spec')}
     ${cell('qty', 'num')}
     ${cell('price', 'num')}
-    ${num(isNew && !row.price ? '' : calc.supply, calc.supply < 0 ? 'neg' : '')}
-    ${num(isNew && !row.price ? '' : calc.total, calc.total < 0 ? 'neg' : '')}
-    ${num(isNew && !row.price ? '' : calc.tax, calc.tax < 0 ? 'neg' : '')}
+    ${num(isNew && !row.price ? '' : calc.supply, calc.supply < 0 ? 'neg' : '', 'supply')}
+    ${num(isNew && !row.price ? '' : calc.total, calc.total < 0 ? 'neg' : '', 'total')}
+    ${num(isNew && !row.price ? '' : calc.tax, calc.tax < 0 ? 'neg' : '', 'tax')}
     ${cell('paid', 'num')}
-    ${num(balance, balance > 0 ? 'warn' : balance < 0 ? 'neg' : '')}
+    ${num(balance, balance > 0 ? 'warn' : balance < 0 ? 'neg' : '', 'balance')}
     <td class="actions">${
       row.kind === 'tx'
         ? `<button data-act="sheet" data-id="${row.id}">명세표</button><button data-act="del" data-id="${row.id}" class="danger" title="삭제">✕</button>`
@@ -1486,7 +1489,7 @@ async function drawTxRows() {
   // 새로 적을 수 있는 첫 빈 줄이 보이도록
   const firstBlank = gridRows.findIndex((r) => r.kind === 'new');
   const tr = $(`#txRows tr[data-r="${firstBlank}"]`);
-  if (tr) tr.scrollIntoView({ block: 'center' });
+  if (tr) tr.scrollIntoView({ block: 'nearest' });
 }
 
 function bindGridEvents(tbody) {
