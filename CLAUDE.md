@@ -15,7 +15,13 @@ UI 문구, 커밋 메시지, 문서는 모두 한국어를 사용한다.
   "운영 반영해줘"라는 별도 요청을 기다리지 않는다.
   사용자가 "운영에 바로 적용하지 마라"고 말하면 그때부터 develop에만 올린다.
 - 기능이 develop에 머지될 때마다 package.json의 version을 올린다 —
-  화면 하단 버전 표시(/api/version)로 배포 확인에 쓰인다.
+  화면 하단 버전 표시(/api/version)로 배포 확인에 쓰인다
+- **버전을 올릴 때 4곳을 같이 맞춘다**: package.json, public/app.js의
+  `APP_VERSION`, index.html·login.html의 `style.css?v=`·`app.js?v=`.
+  Cloudflare 프록시·브라우저가 css/js를 캐시해 옛 화면이 남는 문제를 이 쿼리로
+  우회한다. app.js는 서버 버전과 자기 APP_VERSION이 다르면 한 번 자동
+  새로고침하고, 그래도 다르면 하단에 ⚠ 경고를 띄운다 (v1.15.2).
+  하단 버전 표시는 서버 버전이므로 화면 코드가 최신이라는 보장이 아니다.
 - `main` 브랜치는 삭제되었다. 다시 만들거나 푸시하지 말 것
   (Vercel Production Branch는 `production`).
 - DB는 환경별로 분리되어 있다: Production은 Neon 기본 브랜치,
@@ -61,7 +67,7 @@ UI 문구, 커밋 메시지, 문서는 모두 한국어를 사용한다.
 
 - **운영** https://ledger.anon-chat.kr — `production` 브랜치
 - **개발** https://dev-ledger.anon-chat.kr — `develop` 브랜치
-- 두 브랜치는 **같은 내용으로 유지**한다 (동시 반영이 기본값). 현재 **v1.15.1**
+- 두 브랜치는 **같은 내용으로 유지**한다 (동시 반영이 기본값). 현재 **v1.15.2**
 - 두 도메인 모두 Cloudflare 프록시(주황 구름) 상태 — SSL 자동 갱신 실패 위험이 있어
   DNS 전용(회색 구름)을 권했으나 사용자 미적용. Vercel 운영 브랜치 설정 위치는
   Settings → Environments → Production → Branch Tracking (구 UI의 Git 메뉴 아님)
