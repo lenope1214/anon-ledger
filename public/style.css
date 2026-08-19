@@ -295,6 +295,25 @@ form label input, form label select { margin-top: 0.2rem; font-weight: 400; }
 /* 빈 줄도 높이를 유지해 엑셀처럼 보이게 */
 .grid-table tbody td { height: 2.4rem; }
 
+/* 매출·매입 구분 */
+.kind-cell { width: 3.2rem; text-align: center; }
+.kind-tag {
+  display: inline-block;
+  padding: 0.1rem 0.4rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  border: 1px solid transparent;
+  white-space: nowrap;
+}
+.kind-sale { color: var(--accent-dark); background: #eff6ff; border-color: #bfdbfe; }
+.kind-buy { color: #b45309; background: #fff7ed; border-color: #fed7aa; }
+.kind-pay { color: #15803d; background: #f0fdf4; border-color: #bbf7d0; }
+#txRows td.kind-cell[data-f="kind"] { cursor: pointer; }
+#txRows tr.row-buy td { background: #fffaf3; }
+#txRows tr.row-buy.row-checked td { background: #fefce8; }
+.ledger-doc tbody tr.row-buy td { background: #fffaf3; }
+
 /* 입금(수금) 줄 */
 .pay-btn { color: #15803d; border-color: #86efac; font-weight: 700; }
 .pay-btn:hover { background: #f0fdf4; }
@@ -832,8 +851,17 @@ body.easy .fab, body.easy .fab-help { display: none; }
     border-bottom: 1px solid var(--line);
   }
 
-  .grid-table tbody td {
-    border: none; /* 카드형에서는 칸 테두리 없이 라벨로 구분한다 */
+  /* 카드형에서는 색을 칸이 아니라 줄 전체에 칠한다 (칸마다 네모가 생기지 않게) */
+  #txRows tr.row-buy { background: #fffaf3; }
+  #txRows tr.row-pay { background: #f0fdf4; }
+  #txRows tr.row-checked { background: #fefce8; }
+  #txRows tr.row-buy td,
+  #txRows tr.row-pay td,
+  #txRows tr.row-checked td { background: none; }
+
+  .grid-table tbody td,
+  .grid-table tbody td[data-f]:not([data-edit]) {
+    border: none; /* 카드형에서는 칸 테두리·회색 바탕 없이 라벨로만 구분한다 */
     background: none;
     padding: 0.15rem 0.1rem;
     height: auto;
@@ -861,6 +889,7 @@ body.easy .fab, body.easy .fab-help { display: none; }
   .grid-table td.chk { flex: 0 0 1.4rem; }
   /* 명세표·삭제 버튼은 첫 줄(날짜·상호)의 빈 오른쪽에 올려 한 줄을 아낀다 */
   .grid-table td.chk { order: 1; }
+  .grid-table td.kind-cell { order: 1; width: auto; }
   .grid-table td[data-f="date"] { order: 2; }
   .grid-table td[data-f="company"] { order: 3; }
   .grid-table td.actions { order: 4; margin-left: auto; display: flex; gap: 0.25rem; }
