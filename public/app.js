@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.15.2'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.15.3'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -1561,11 +1561,16 @@ function bindGridEvents(tbody) {
     if (!tr || !td) return;
     const i = Number(tr.dataset.r);
     if (td.classList.contains('chk')) {
-      if (!cb) return;
+      let box = cb;
+      if (!box) { // 네모 옆 여백을 눌러도 체크되게
+        box = td.querySelector('input[type="checkbox"]');
+        if (!box) return;
+        box.checked = !box.checked;
+      }
       const key = (tr.dataset.kind === 'pay' ? 'p' : 't') + tr.dataset.id;
-      if (cb.checked) checkedTxIds.add(key);
+      if (box.checked) checkedTxIds.add(key);
       else checkedTxIds.delete(key);
-      tr.classList.toggle('row-checked', cb.checked);
+      tr.classList.toggle('row-checked', box.checked);
       sheetLastIdx = i;
       updatePointerHighlight();
       updateSelSummary();
