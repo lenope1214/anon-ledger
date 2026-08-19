@@ -264,6 +264,29 @@ form label input, form label select { margin-top: 0.2rem; font-weight: 400; }
 .ledger-doc td:nth-child(2) { white-space: normal; }
 #ledgerSheet .sheet { padding: 1rem; border: 1px solid var(--line); border-radius: 8px; overflow-x: auto; }
 
+/* 엑셀식 셀 입력 그리드 */
+.grid-table td[data-edit] { cursor: cell; }
+.grid-table td[data-edit]:hover { background: #eff6ff; }
+.grid-table tr.row-new td { color: var(--text); }
+.grid-table tr.row-new td[data-edit]:empty::after { content: ''; display: inline-block; min-height: 1.2em; }
+.grid-table td.cell-editing { padding: 0; background: #fff; }
+.cell-input {
+  width: 100%;
+  border: 2px solid var(--accent);
+  border-radius: 4px;
+  padding: 0.4rem 0.45rem;
+  font: inherit;
+  font-size: 0.92rem;
+  background: #fff;
+}
+.cell-input:focus { outline: none; }
+#txRows tr.row-new:hover td { background: #f8fafc; }
+#txRows tr.row-pointer { outline: 2px solid var(--accent); outline-offset: -2px; }
+.cell-company { font-weight: 700; }
+
+/* 빈 줄도 높이를 유지해 엑셀처럼 보이게 */
+.grid-table tbody td { height: 2.4rem; }
+
 /* 입금(수금) 줄 */
 .pay-btn { color: #15803d; border-color: #86efac; font-weight: 700; }
 .pay-btn:hover { background: #f0fdf4; }
