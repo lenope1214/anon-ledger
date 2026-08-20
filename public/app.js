@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.17.0'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.18.0'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -16,8 +16,8 @@ const state = {
   txCompanyId: '',      // 거래관리 탭 필터 ('' = 전체)
   productsCache: {},    // 자동완성용 상호별 제품 캐시
   entryVat: 'separate', // 빠른 입력 행의 부가세 방식
-  entryKind: 'sale',    // 새로 적는 줄의 구분 (sale=판 것, purchase=산 것)
-  txKindFilter: '',     // 거래 필터: '' 전체 / 'sale' 매출만 / 'purchase' 매입만
+  entryKind: 'sale',    // 새로 적는 줄의 참조(구분)
+  txKindFilter: '',     // 거래 필터: '' 전체 / 참조 이름
   entryDate: '',        // 빠른 입력 행에서 마지막으로 쓴 날짜
   entryCompanyId: '',   // 빠른 입력 행에서 마지막으로 쓴 상호
   txFrom: '',           // 거래 필터: 시작일
@@ -29,13 +29,30 @@ try {
   const savedVat = localStorage.getItem('entryVat');
   if (savedVat && ['separate', 'included', 'none'].includes(savedVat)) state.entryVat = savedVat;
   const savedKind = localStorage.getItem('entryKind');
-  if (savedKind === 'sale' || savedKind === 'purchase') state.entryKind = savedKind;
+  if (savedKind) state.entryKind = savedKind;
   state.easyMode = localStorage.getItem('easyMode') === '1';
 } catch (e) { /* localStorage 사용 불가 환경 */ }
 
 const VAT_LABEL = { separate: '부가세 별도', included: '부가세 포함', none: '부가세 없음' };
-const KIND_LABEL = { sale: '매출', purchase: '매입' };          // 판 것 / 산 것
-const KIND_ENTRY_LABEL = { sale: '🧾 판 것(매출)', purchase: '🛒 산 것(매입)' };
+// 참조(거래 구분) 6가지 — 컴장부와 같은 이름·동작
+//  입금/출금: 품목 없이 금액만 적는다 (돈만 오감)
+//  외출/매출: 물건이 나감 (외출 = 아직 정산 안 됨)
+//  외입/매입: 물건이 들어옴 (외입 = 아직 정산 안 됨)
+const KINDS = {
+  deposit:         { label: '입금', pair: 'withdraw',        cls: 'kind-in',   help: '돈이 들어옴 (금액만)' },
+  withdraw:        { label: '출금', pair: 'deposit',         cls: 'kind-out',  help: '돈이 나감 (금액만)' },
+  credit_sale:     { label: '외출', pair: 'sale',            cls: 'kind-csale', help: '물건 나감 · 아직 정산 안 됨' },
+  sale:            { label: '매출', pair: 'credit_sale',     cls: 'kind-sale', help: '물건 나감 · 정산됨' },
+  credit_purchase: { label: '외입', pair: 'purchase',        cls: 'kind-cbuy', help: '물건 들어옴 · 아직 정산 안 됨' },
+  purchase:        { label: '매입', pair: 'credit_purchase', cls: 'kind-buy',  help: '물건 들어옴 · 정산됨' },
+};
+const KIND_LIST = Object.keys(KINDS);
+const KIND_LABEL = Object.fromEntries(KIND_LIST.map((k) => [k, KINDS[k].label]));
+const MONEY_ONLY = ['deposit', 'withdraw'];                 // 품목 없이 금액만
+const OUT_KINDS = ['sale', 'credit_sale'];                  // 물건이 나간 것(매출류)
+const IN_KINDS = ['purchase', 'credit_purchase'];           // 물건이 들어온 것(매입류)
+const kindOf = (k) => (KINDS[k] ? k : 'sale');
+const isMoneyOnly = (k) => MONEY_ONLY.includes(kindOf(k));
 
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -260,9 +277,9 @@ async function renderCompanyLedger() {
   const inRange = (d) => (!ledgerView.from || d >= ledgerView.from) && (!ledgerView.to || d <= ledgerView.to);
   const all = txs
     .map((t) => ({
-      buy: t.kind === 'purchase',
+      buy: IN_KINDS.includes(kindOf(t.kind)),
       date: t.date, id: t.id,
-      label: (t.kind === 'purchase' ? '🛒 매입 ' : '') + itemLabel(t),
+      label: `[${KIND_LABEL[kindOf(t.kind)]}] ` + (t.items && t.items.length ? itemLabel(t) : ''),
       amount: t.total,
       tx: t,
     }))
@@ -355,9 +372,8 @@ async function renderReports() {
   const y = reportView.year;
 
   const MODES = { profit: '월별 손익', company: '거래처별', product: '품목별' };
-  const isBuy = (t) => t.kind === 'purchase';
-  const sales = txs.filter((t) => !isBuy(t));   // 판 것
-  const buys = txs.filter(isBuy);               // 산 것
+  const sales = txs.filter((t) => OUT_KINDS.includes(kindOf(t.kind)));  // 매출 + 외출
+  const buys = txs.filter((t) => IN_KINDS.includes(kindOf(t.kind)));    // 매입 + 외입
   let table = '';
 
   if (reportView.mode === 'profit') {
@@ -527,10 +543,10 @@ function exportTransactionsCsv() {
   const txRows = txCache
     .filter((t) => inRange(t.date))
     .filter((t) => !q || t.items.some((it) => it.name.toLowerCase().includes(q)))
-    .filter((t) => !state.txKindFilter || (t.kind === 'purchase' ? 'purchase' : 'sale') === state.txKindFilter)
+    .filter((t) => !state.txKindFilter || kindOf(t.kind) === state.txKindFilter)
     .flatMap((t) =>
       t.items.map((it) => [
-        t.date, t.companyName, KIND_LABEL[t.kind === 'purchase' ? 'purchase' : 'sale'],
+        t.date, t.companyName, KIND_LABEL[kindOf(t.kind)],
         it.name, it.spec, it.qty, it.price, it.supply, it.tax, it.supply + it.tax, t.memo,
       ])
     );
@@ -777,7 +793,7 @@ let txCache = [];
 let checkedTxIds = new Set(); // 체크된 줄 (새로고침 전까지 유지, 't123'/'p45' 형태)
 
 const rowKey = (tr) => 't' + tr.dataset.id;
-let sheetLastIdx = null;      // 마지막으로 체크한 행 위치 ('=' 연속 체크용)
+let sheetLastIdx = null;      // 마지막으로 체크한 행 위치 (Ins 연속 체크용)
 
 function setEasyMode(on) {
   state.easyMode = on;
@@ -807,12 +823,11 @@ async function renderTransactions() {
         <input type="search" id="fProduct" placeholder="품명 검색" value="${esc(state.txProductQuery)}">
         <button id="btnClearFilter" title="검색 조건 초기화">초기화</button>
         <select id="kindFilter" class="vat-select" title="매출·매입 걸러 보기">
-          <option value="" ${state.txKindFilter === '' ? 'selected' : ''}>매출·매입 모두</option>
-          <option value="sale" ${state.txKindFilter === 'sale' ? 'selected' : ''}>매출만 보기</option>
-          <option value="purchase" ${state.txKindFilter === 'purchase' ? 'selected' : ''}>매입만 보기</option>
+          <option value="" ${state.txKindFilter === '' ? 'selected' : ''}>참조 전체 보기</option>
+          ${KIND_LIST.map((k) => `<option value="${k}" ${state.txKindFilter === k ? 'selected' : ''}>${KINDS[k].label}만 보기</option>`).join('')}
         </select>
-        <select id="entryKind" class="vat-select" title="새로 적는 줄의 구분">
-          ${Object.entries(KIND_ENTRY_LABEL).map(([v, l]) => `<option value="${v}" ${v === state.entryKind ? 'selected' : ''}>${l}</option>`).join('')}
+        <select id="entryKind" class="vat-select" title="새로 적는 줄의 참조">
+          ${KIND_LIST.map((k) => `<option value="${k}" ${k === state.entryKind ? 'selected' : ''}>${KINDS[k].label} — ${KINDS[k].help}</option>`).join('')}
         </select>
         <select id="entryVat" class="vat-select" title="새로 적는 줄의 부가세 방식">
           ${Object.entries(VAT_LABEL).map(([v, l]) => `<option value="${v}" ${v === state.entryVat ? 'selected' : ''}>${l}</option>`).join('')}
@@ -825,7 +840,7 @@ async function renderTransactions() {
       <p class="summary"><span id="txSummary"></span><span id="selSummary" class="sel-summary"></span></p>
       <div class="table-wrap ledger-wrap">
         <table class="ledger-table grid-table">
-          <thead><tr><th class="chk"></th><th>구분</th><th>날짜</th><th>상호</th><th>품명</th><th>규격</th><th class="num">수량</th><th class="num">단가</th><th class="num">공급가액</th><th class="num">합계</th><th class="num">세액</th><th class="actions"></th></tr></thead>
+          <thead><tr><th class="chk"></th><th>날짜</th><th>거래처</th><th>품목</th><th>규격</th><th class="num">수량</th><th class="num">단가</th><th class="num">공급가액</th><th>참조</th><th class="num">부가세</th><th class="num">합계</th><th class="actions"></th></tr></thead>
           <tbody id="txRows"></tbody>
         </table>
       </div>
@@ -833,11 +848,12 @@ async function renderTransactions() {
         <span>빈 칸을 <b>눌러서</b> 적으세요 · 이미 적은 칸도 눌러 고칠 수 있습니다</span>
         <span><b>Enter</b> 다음 칸 · 줄 끝에서 저장</span>
         <span><b>↑↓ ← →</b> 칸 이동</span>
-        <span><b>ESC</b> 그 칸으로 검색 (상호/품명)</span>
+        <span><b>Tab</b> 거래처·품목 검색</span>
+        <span><b>=</b> 참조 반전 · <b>Ins</b> 연속 선택</span>
         <span><b>F2</b> 커서 고정</span>
         <button type="button" id="btnHelpInline" class="link-btn">자세한 사용법 보기</button>
       </p>
-      <button type="button" class="fab" id="btnQuickSearch" title="빠른 검색 (ESC)">🔍 검색</button>
+      <button type="button" class="fab" id="btnQuickSearch" title="빠른 검색 (Tab)">🔍 검색</button>
       <button type="button" class="fab fab-help" id="btnHelp" title="사용법 안내">?</button>
     </section>`;
 
@@ -884,7 +900,7 @@ async function renderTransactions() {
     drawTxRows();
   });
   $('#entryKind').addEventListener('change', (e) => {
-    state.entryKind = e.target.value === 'purchase' ? 'purchase' : 'sale';
+    state.entryKind = kindOf(e.target.value);
     try {
       localStorage.setItem('entryKind', state.entryKind);
     } catch (err) { /* 무시 */ }
@@ -986,7 +1002,7 @@ async function renderTransactionsEasy() {
         <div class="easy-field">
           <span class="easy-label">구분</span>
           <select id="xKind">
-            ${Object.entries(KIND_ENTRY_LABEL).map(([v, l]) => `<option value="${v}" ${v === state.entryKind ? 'selected' : ''}>${l}</option>`).join('')}
+            ${KIND_LIST.map((k) => `<option value="${k}" ${k === state.entryKind ? 'selected' : ''}>${KINDS[k].label} — ${KINDS[k].help}</option>`).join('')}
           </select>
         </div>
         <div class="easy-field">
@@ -1009,7 +1025,7 @@ async function renderTransactionsEasy() {
   const preferred = state.companies.find((c) => String(c.id) === String(state.entryCompanyId));
   if (preferred) xCompany.value = preferred.name;
 
-  // 입력 중에는 목록을 띄우지 않는다 — 찾을 땐 ESC(또는 🔍 버튼)를 쓴다
+  // 입력 중에는 목록을 띄우지 않는다 — 찾을 땐 Tab(또는 🔍 버튼)을 쓴다
   xCompany.addEventListener('input', () => {
     state.entryCompanyId = ''; // 이름을 고치면 새 상호로 취급 (없으면 자동 등록)
   });
@@ -1054,7 +1070,7 @@ async function renderTransactionsEasy() {
   });
   $('#xPrice').addEventListener('input', easyRecompute);
   $('#xKind').addEventListener('change', (e) => {
-    state.entryKind = e.target.value === 'purchase' ? 'purchase' : 'sale';
+    state.entryKind = kindOf(e.target.value);
     try {
       localStorage.setItem('entryKind', state.entryKind);
     } catch (err) { /* 무시 */ }
@@ -1163,13 +1179,14 @@ async function drawEasyList() {
     .map((t) => {
       const it = t.items[0];
       const more = t.items.length > 1 ? ` 외 ${t.items.length - 1}건` : '';
-      const buy = t.kind === 'purchase';
+      const kind = kindOf(t.kind);
+      const buy = IN_KINDS.includes(kind);
       return `<div class="easy-item ${buy ? 'easy-item-buy' : ''}" data-id="${t.id}" data-kind="tx">
         <div class="easy-item-head"><b>${esc(t.companyName)}</b><span>${esc(t.date)}</span></div>
-        <div class="easy-item-name"><span class="kind-tag ${buy ? 'kind-buy' : 'kind-sale'}">${buy ? '매입' : '매출'}</span> ${esc(it.name)}${more}</div>
+        <div class="easy-item-name"><span class="kind-tag ${KINDS[kind].cls}">${KINDS[kind].label}</span> ${esc(it.name)}${more}</div>
         <div class="easy-item-foot">
           <b class="${t.total < 0 ? 'neg' : ''}">${won(t.total)}원</b>
-          ${buy ? '' : '<button type="button" data-act="sheet">명세표</button>'}
+          ${OUT_KINDS.includes(kind) ? '<button type="button" data-act="sheet">명세표</button>' : ''}
           <button type="button" data-act="del" class="danger">삭제</button>
         </div>
       </div>`;
@@ -1436,14 +1453,17 @@ const blankRow = () => ({
 });
 
 function rowFromTx(t) {
-  const it = t.items[0];
-  const multi = t.items.length > 1;
+  const items = t.items || [];
+  const it = items[0] || { name: '', spec: '', qty: '', price: '' };
+  const multi = items.length > 1;
   return {
     kind: 'tx', id: t.id, tx: t, multi,
-    txKind: t.kind === 'purchase' ? 'purchase' : 'sale',
+    txKind: kindOf(t.kind),
     date: t.date, companyId: t.companyId, companyName: t.companyName,
-    name: it.name + (multi ? ` 외 ${t.items.length - 1}건` : ''), spec: multi ? '' : it.spec,
-    qty: multi ? '' : it.qty, price: multi ? '' : it.price,
+    name: items.length ? it.name + (multi ? ` 외 ${items.length - 1}건` : '') : '',
+    spec: multi ? '' : it.spec,
+    qty: multi || !items.length ? '' : it.qty,
+    price: multi || !items.length ? '' : it.price,
     supply: t.supplyTotal, total: t.total, tax: t.taxTotal, paid: t.paid,
   };
 }
@@ -1467,29 +1487,44 @@ const CELL_PH = { date: '날짜', company: '상호', name: '품명', spec: '규�
 function rowHtml(row, i) {
   const isNew = row.kind === 'new';
   const calc = isNew ? newRowCalc(row) : row;
-  const editable = (f) => (row.kind === 'tx' && row.multi && ['name', 'spec', 'qty', 'price'].includes(f) ? '' : ' data-edit="1"');
+  const kind = kindOf(row.txKind);
+  const money = isMoneyOnly(kind);            // 입금·출금은 금액 한 칸만 쓴다
+  const fields = editableFields(row);
+  const editable = (f) => (fields.includes(f) ? ' data-edit="1"' : '');
   const cell = (f, cls) =>
     `<td class="${cls || ''}"${editable(f)} data-f="${f}" data-ph="${CELL_PH[f] || ''}">${esc(cellText(row, f))}</td>`;
   const key = row.kind === 'new' ? '' : 't' + row.id;
   const checked = key && checkedTxIds.has(key);
   const num = (v, extra, f) => `<td class="num ${extra || ''}" data-f="${f}">${v === '' || v == null ? '' : won(v)}</td>`;
-  const buy = row.txKind === 'purchase';
-  const kindCell = `<td class="kind-cell" data-f="kind" title="눌러서 매출↔매입 바꾸기"><span class="kind-tag ${buy ? 'kind-buy' : 'kind-sale'}">${buy ? '매입' : '매출'}</span></td>`;
-  return `<tr data-r="${i}" data-kind="${row.kind}" data-id="${row.id || ''}" class="${buy ? 'row-buy' : ''} ${checked ? 'row-checked' : ''} ${isNew ? 'row-new' : ''}">
+  const blankNum = isNew && !row.price && !money;
+  const supplyCell = money
+    ? cell('supply', 'num')                    // 입금·출금은 공급가액을 직접 적는다
+    : num(blankNum ? '' : calc.supply, calc.supply < 0 ? 'neg' : '', 'supply');
+  const rowCls = [
+    IN_KINDS.includes(kind) ? 'row-buy' : '',
+    money ? 'row-money' : '',
+    checked ? 'row-checked' : '',
+    isNew ? 'row-new' : '',
+  ].filter(Boolean).join(' ');
+  return `<tr data-r="${i}" data-kind="${row.kind}" data-id="${row.id || ''}" class="${rowCls}">
     <td class="chk">${key ? `<input type="checkbox" ${checked ? 'checked' : ''}>` : ''}</td>
-    ${kindCell}
     ${cell('date')}
     ${cell('company', 'cell-company')}
     ${cell('name')}
     ${cell('spec')}
     ${cell('qty', 'num')}
     ${cell('price', 'num')}
-    ${num(isNew && !row.price ? '' : calc.supply, calc.supply < 0 ? 'neg' : '', 'supply')}
-    ${num(isNew && !row.price ? '' : calc.total, calc.total < 0 ? 'neg' : '', 'total')}
-    ${num(isNew && !row.price ? '' : calc.tax, calc.tax < 0 ? 'neg' : '', 'tax')}
+    ${supplyCell}
+    <td class="kind-cell" data-f="kind" title="눌러서 반대로 바꾸기 (= 키)"><span class="kind-tag ${KINDS[kind].cls}">${KINDS[kind].label}</span></td>
+    ${num(money || blankNum ? '' : calc.tax, calc.tax < 0 ? 'neg' : '', 'tax')}
+    ${
+      money
+        ? num(row.supply === '' || row.supply == null ? '' : row.supply, Number(row.supply) < 0 ? 'neg' : '', 'total')
+        : num(blankNum ? '' : calc.total, calc.total < 0 ? 'neg' : '', 'total')
+    }
     <td class="actions">${
       row.kind === 'tx'
-        ? `${buy ? '' : `<button data-act="sheet" data-id="${row.id}">명세표</button>`}<button data-act="del" data-id="${row.id}" class="danger" title="삭제">✕</button>`
+        ? `${OUT_KINDS.includes(kind) ? `<button data-act="sheet" data-id="${row.id}">명세표</button>` : ''}<button data-act="del" data-id="${row.id}" class="danger" title="삭제">✕</button>`
         : ''
     }</td>
   </tr>`;
@@ -1550,10 +1585,7 @@ async function drawTxRows() {
   const q = state.txProductQuery.trim().toLowerCase();
   let list = txCache.filter((t) => inRange(t.date));
   if (q) list = list.filter((t) => t.items.some((it) => it.name.toLowerCase().includes(q)));
-  if (state.txKindFilter) {
-    const want = state.txKindFilter;
-    list = list.filter((t) => (t.kind === 'purchase' ? 'purchase' : 'sale') === want);
-  }
+  if (state.txKindFilter) list = list.filter((t) => kindOf(t.kind) === state.txKindFilter);
   $('#txSummary').textContent = summaryText(list.map(rowFromTx));
 
   // 저장된 줄을 날짜순으로 깔고, 맨 아래에 빈 줄 한 줄을 붙인다
@@ -1610,7 +1642,7 @@ async function toggleRowKind(r) {
 async function flipRowKind(r, keepEditing) {
   const row = gridRows[r];
   if (!row) return;
-  row.txKind = row.txKind === 'purchase' ? 'sale' : 'purchase';
+  row.txKind = KINDS[kindOf(row.txKind)].pair;
   if (keepEditing) paintKindCell(r);
   else paintRow(r);
   if (row.kind === 'tx') await saveExistingRow(row, r, keepEditing);
@@ -1622,12 +1654,13 @@ function paintKindCell(r) {
   const row = gridRows[r];
   const tr = $(`#txRows tr[data-r="${r}"]`);
   if (!row || !tr) return;
-  const buy = row.txKind === 'purchase';
+  const kind = kindOf(row.txKind);
   const td = tr.querySelector('td.kind-cell');
-  if (td) td.innerHTML = `<span class="kind-tag ${buy ? 'kind-buy' : 'kind-sale'}">${buy ? '매입' : '매출'}</span>`;
-  tr.classList.toggle('row-buy', buy);
+  if (td) td.innerHTML = `<span class="kind-tag ${KINDS[kind].cls}">${KINDS[kind].label}</span>`;
+  tr.classList.toggle('row-buy', IN_KINDS.includes(kind));
+  tr.classList.toggle('row-money', isMoneyOnly(kind));
   const sheetBtn = tr.querySelector('button[data-act="sheet"]');
-  if (sheetBtn && buy) sheetBtn.remove(); // 매입 줄에는 명세표가 없다
+  if (sheetBtn && !OUT_KINDS.includes(kind)) sheetBtn.remove(); // 물건이 나간 줄에만 명세표
   updateSummaryOnly();
 }
 
@@ -1658,7 +1691,7 @@ async function openCellEditor(r, field) {
 
   const td = $(`#txRows tr[data-r="${r}"] td[data-f="${field}"]`);
   if (!td) return;
-  const isNum = ['qty', 'price', 'paid'].includes(field);
+  const isNum = ['qty', 'price', 'paid', 'supply'].includes(field);
   const input = document.createElement('input');
   input.className = 'cell-input';
   if (field === 'date') input.type = 'date';
@@ -1718,7 +1751,7 @@ function applyCellValue() {
     const found = state.companies.find((c) => c.name.toLowerCase() === value.toLowerCase());
     row.companyId = found ? found.id : 0;
     if (found) state.entryCompanyId = String(found.id);
-  } else if (['qty', 'price', 'paid'].includes(field)) {
+  } else if (['qty', 'price', 'paid', 'supply'].includes(field)) {
     row[field] = value === '' ? '' : cellNum(value);
   } else {
     row[field] = value;
@@ -1784,22 +1817,34 @@ function commitCellNow(mayLeave) {
   updateSaveBar();
 }
 
+// 서버로 보낼 거래 내용 (참조에 따라 품목 없이 금액만 보내기도 한다)
+function txPayload(row, isNew) {
+  const kind = kindOf(row.txKind);
+  const base = {
+    companyId: row.companyId || 0,
+    companyName: row.companyName,
+    date: row.date || today(),
+    kind,
+    memo: (row.tx && row.tx.memo) || '',
+  };
+  if (isMoneyOnly(kind)) return Object.assign(base, { amount: Number(row.supply) || 0, items: [] });
+  const items = row.multi
+    ? row.tx.items
+    : [{ name: row.name, spec: row.spec, qty: Number(row.qty) || (isNew ? 1 : 0), price: Number(row.price) || 0 }];
+  return Object.assign(base, {
+    vatMode: isNew ? state.entryVat : (row.tx && row.tx.vatMode) || state.entryVat,
+    items,
+    paid: 0,
+  });
+}
+
 // 기존 줄은 셀을 고칠 때마다 바로 저장한다
 async function saveExistingRow(row, r, keepEditing) {
   try {
     {
-      const items = row.multi
-        ? row.tx.items
-        : [{ name: row.name, spec: row.spec, qty: Number(row.qty) || 0, price: Number(row.price) || 0 }];
-      const saved = await api('PUT', '/api/transactions/' + row.id, {
-        companyId: row.companyId, companyName: row.companyName,
-        date: row.date, kind: row.txKind === 'purchase' ? 'purchase' : 'sale',
-        vatMode: row.tx.vatMode, items,
-        paid: Number(row.paid) || 0, memo: row.tx.memo,
-      });
+      const saved = await api('PUT', '/api/transactions/' + row.id, txPayload(row, false));
       if (isLastPendingSave(r)) { // 뒤이어 저장할 게 남아 있으면 화면 값을 건드리지 않는다
         Object.assign(row, rowFromTx(Object.assign({ companyName: row.companyName }, saved)));
-        row.txKind = saved.kind === 'purchase' ? 'purchase' : 'sale';
       }
     }
     toast('고쳤습니다.');
@@ -1820,20 +1865,15 @@ async function saveNewRowIfReady(r) {
   const row = gridRows[r];
   if (!row || row.kind !== 'new') return false;
   if (!row.companyName.trim()) return false;
-  if (!row.name.trim() && !fillNewRowFromLast(row)) return false;
-  if (!row.name.trim()) return false;
+  if (isMoneyOnly(row.txKind)) {
+    if (!Number(row.supply)) return false; // 입금·출금은 금액이 있어야 저장
+  } else {
+    if (!row.name.trim() && !fillNewRowFromLast(row)) return false;
+    if (!row.name.trim()) return false;
+  }
 
   try {
-    const tx = await api('POST', '/api/transactions', {
-      companyId: row.companyId || 0,
-      companyName: row.companyName,
-      date: row.date || today(),
-      kind: row.txKind === 'purchase' ? 'purchase' : 'sale',
-      vatMode: state.entryVat,
-      items: [{ name: row.name, spec: row.spec, qty: Number(row.qty) || 1, price: Number(row.price) || 0 }],
-      paid: Number(row.paid) || 0,
-      memo: '',
-    });
+    const tx = await api('POST', '/api/transactions', txPayload(row, true));
     // 새로 만들어진 상호면 목록을 바로 읽어와야 이름이 붙는다
     if (state.companies.some((x) => x.id === tx.companyId)) scheduleCompanyRefresh();
     else await refreshCompanies();
@@ -1868,12 +1908,17 @@ function fillNewRowFromLast(row) {
 
 // 화면에 보이는 줄로 매출·매입·이익을 요약한다
 function summaryText(txRows) {
-  const saleTotal = txRows.filter((r) => r.txKind !== 'purchase').reduce((s, r) => s + r.total, 0);
-  const buyTotal = txRows.filter((r) => r.txKind === 'purchase').reduce((s, r) => s + r.total, 0);
+  const sum = (kinds) => txRows.filter((r) => kinds.includes(kindOf(r.txKind))).reduce((s, r) => s + r.total, 0);
+  const saleTotal = sum(OUT_KINDS);   // 매출 + 외출
+  const buyTotal = sum(IN_KINDS);     // 매입 + 외입
+  const inMoney = sum(['deposit']);
+  const outMoney = sum(['withdraw']);
   const parts = [`거래 ${txRows.length}건`];
   if (saleTotal || !buyTotal) parts.push(`매출 ${won(saleTotal)}원`);
   if (buyTotal) parts.push(`매입 ${won(buyTotal)}원`);
   if (saleTotal && buyTotal) parts.push(`이익 ${won(saleTotal - buyTotal)}원`);
+  if (inMoney) parts.push(`입금 ${won(inMoney)}원`);
+  if (outMoney) parts.push(`출금 ${won(outMoney)}원`);
   return parts.join(' · ');
 }
 
@@ -1886,7 +1931,8 @@ function updateSummaryOnly() {
 /* ── 셀 사이 이동 ── */
 function editableFields(row) {
   if (!row) return GRID_COLS;
-  if (row.kind === 'tx' && row.multi) return ['date', 'company']; // 품목은 팝업에서 고친다
+  if (isMoneyOnly(row.txKind)) return ['date', 'company', 'supply']; // 입금·출금은 금액만
+  if (row.kind === 'tx' && row.multi) return ['date', 'company'];    // 품목은 팝업에서 고친다
   return GRID_COLS;
 }
 
@@ -1952,7 +1998,9 @@ function onCellKey(e) {
     moveCell(0, 1);
   } else if (e.key === 'Tab') {
     e.preventDefault();
-    moveCell(0, e.shiftKey ? -1 : 1);
+    // 컴장부처럼 거래처·품목 칸에서는 Tab이 검색창을 연다
+    if (field === 'company' || field === 'name') openContextSearch();
+    else moveCell(0, e.shiftKey ? -1 : 1);
   } else if (e.key === 'ArrowDown') {
     e.preventDefault();
     moveCell(1, 0);
@@ -1965,15 +2013,13 @@ function onCellKey(e) {
   } else if (e.key === 'ArrowLeft' && caretAtEdge(input, -1)) {
     e.preventDefault();
     moveCell(0, -1);
-  } else if (e.key === '=' && ['price', 'paid', 'qty'].includes(field)) {
-    // 숫자 칸에서 = : 매출↔매입을 뒤집고 +/− 부호도 함께 뒤집는다
-    // (품명·상호 같은 글자 칸에서는 '=' 를 그대로 적을 수 있게 둔다)
+  } else if (e.key === '=' && field !== 'name' && field !== 'spec' && field !== 'company') {
+    // = : 참조를 반대로 뒤집는다 (입금↔출금, 외출↔매출, 외입↔매입)
+    // 글자 칸에서는 '=' 를 그대로 적을 수 있게 둔다
     e.preventDefault();
-    const v = cellNum(input.value);
-    if (v !== 0) input.value = String(-v);
     flipRowKind(gridEdit.r, true);
   } else if (e.key === 'Escape' && (field === 'company' || field === 'name')) {
-    // 한 번의 ESC로 바로 검색 — 한글을 조합하는 중이어도 적은 글자를 그대로 가져간다
+    // ESC로도 바로 검색 (Tab이 기본) — 한글을 조합하는 중이어도 적은 글자를 그대로 가져간다
     e.preventDefault();
     e.stopPropagation();
     openContextSearch();
@@ -1989,9 +2035,9 @@ function updateSelSummary() {
     el.innerHTML = '';
     return;
   }
-  const saleSum = sel.filter((t) => t.kind !== 'purchase').reduce((s, t) => s + t.total, 0);
-  const buySum = sel.filter((t) => t.kind === 'purchase').reduce((s, t) => s + t.total, 0);
-  const canBundle = sel.some((t) => t.kind !== 'purchase');
+  const saleSum = sel.filter((t) => OUT_KINDS.includes(kindOf(t.kind))).reduce((s, t) => s + t.total, 0);
+  const buySum = sel.filter((t) => IN_KINDS.includes(kindOf(t.kind))).reduce((s, t) => s + t.total, 0);
+  const canBundle = sel.some((t) => OUT_KINDS.includes(kindOf(t.kind)));
   el.innerHTML =
     ` · ☑ 선택 ${sel.length}건:` +
     (saleSum || !buySum ? ` 매출 ${won(saleSum)}원` : '') +
@@ -2031,7 +2077,7 @@ function updatePointerHighlight() {
   }
 }
 
-// '=' 연속 체크: 포인터의 다음 행을 체크 (키를 누르고 있으면 반복)
+// Ins 연속 체크: 포인터의 다음 행을 체크 (키를 누르고 있으면 반복)
 function checkNextRow() {
   if (sheetLastIdx == null) return;
   const rows = $$('#txRows tr[data-id]:not([data-id=""])');
@@ -2086,7 +2132,7 @@ function undoCheckRow() {
 
 document.addEventListener('keydown', (e) => {
   if (state.tab !== 'transactions' || gridEdit) return;
-  if (e.key !== '=' && e.key !== '-' && e.key !== 'Backspace') return;
+  if (e.key !== 'Insert' && e.key !== '-' && e.key !== 'Backspace') return;
   // 입력 중일 땐 원래 동작 유지 — 다만 방금 누른 체크 네모는 예외
   // (줄을 클릭해 체크하면 그 네모가 포커스를 갖는데, 이때도 '='로 이어서 체크되어야 한다)
   if (e.target.closest('select, textarea')) return;
@@ -2094,13 +2140,13 @@ document.addEventListener('keydown', (e) => {
   if (inp && !(inp.type === 'checkbox' && inp.closest('#txRows'))) return;
   if (!$('#modal').classList.contains('hidden')) return;
   e.preventDefault();
-  if (e.key === '=') checkNextRow();
+  if (e.key === 'Insert') checkNextRow();
   else if (e.key === '-') skipNextRow();
   else undoCheckRow();
 });
 
-/* ─────────────── 빠른 검색 시트 (ESC / 🔍) ─────────────── */
-const ss = { tab: 'company', items: [], sel: 0, companyId: 0, companyName: '' };
+/* ─────────────── 빠른 검색 시트 (Tab / ESC / 🔍) ─────────────── */
+const ss = { tab: 'company', items: [], sel: 0, matched: true, companyId: 0, companyName: '' };
 
 async function getAllProducts() {
   if (!state.productsCache.all) {
@@ -2200,39 +2246,42 @@ function ssSetTab(tab) {
   $('#ssInput').focus();
 }
 
-// 검색어로 시작하는 항목을 위로 올린다 ('한' → 한식뷔페, 한빛… 먼저)
-function sortByPrefix(list, q) {
-  if (!q) return list.slice().sort((a, b) => a.name.localeCompare(b.name, 'ko'));
-  return list.slice().sort((a, b) => {
-    const ap = a.name.toLowerCase().startsWith(q) ? 0 : 1;
-    const bp = b.name.toLowerCase().startsWith(q) ? 0 : 1;
-    return ap - bp || a.name.localeCompare(b.name, 'ko');
-  });
+// 가나다순 정렬 (컴장부처럼 목록은 늘 전체를 보여준다)
+const sortByName = (list) => list.slice().sort((a, b) => a.name.localeCompare(b.name, 'ko'));
+
+// 적어 둔 글자로 '시작하는' 첫 항목을 찾는다 (없으면 그 글자가 들어간 첫 항목)
+function firstMatchIndex(list, q) {
+  if (!q) return { index: 0, matched: true };
+  const key = q.toLowerCase();
+  const starts = list.findIndex((x) => (x.name || '').toLowerCase().startsWith(key));
+  if (starts >= 0) return { index: starts, matched: true };
+  const has = list.findIndex(
+    (x) => (x.name || '').toLowerCase().includes(key) || (x.owner || '').toLowerCase().includes(key) || (x.spec || '').toLowerCase().includes(key)
+  );
+  return has >= 0 ? { index: has, matched: true } : { index: 0, matched: false };
 }
 
 async function ssUpdate() {
-  const q = $('#ssInput').value.trim().toLowerCase();
+  const q = $('#ssInput').value.trim();
   if (ss.tab === 'company') {
-    ss.items = sortByPrefix(
-      state.companies.filter((c) => !q || c.name.toLowerCase().includes(q) || (c.owner || '').toLowerCase().includes(q)),
-      q
-    ).slice(0, 50);
+    ss.items = sortByName(state.companies);
   } else {
     const names = new Map(state.companies.map((c) => [c.id, c.name]));
     let all = [];
     try {
       all = await getAllProducts();
     } catch (e) { /* 미로그인 등 */ }
-    ss.items = sortByPrefix(
+    ss.items = sortByName(
       all
         .filter((p) => names.has(p.companyId))
-        .filter((p) => !ss.companyId || p.companyId === ss.companyId) // 상호가 정해졌으면 그 상호 제품만
-        .filter((p) => !q || p.name.toLowerCase().includes(q) || (p.spec || '').toLowerCase().includes(q))
-        .map((p) => Object.assign({}, p, { companyName: names.get(p.companyId) })),
-      q
-    ).slice(0, 50);
+        .filter((p) => !ss.companyId || p.companyId === ss.companyId) // 거래처가 정해졌으면 그 거래처 품목만
+        .map((p) => Object.assign({}, p, { companyName: names.get(p.companyId) }))
+    );
   }
-  ss.sel = 0;
+  // 목록은 전체를 두고, 적어 둔 글자에 맞는 자리로 커서만 옮긴다
+  const found = firstMatchIndex(ss.items, q);
+  ss.sel = found.index;
+  ss.matched = found.matched;
   ssRender();
 }
 
@@ -2259,9 +2308,18 @@ const COMPANY_FIELDS = [
 
 // 상호로 좁혀 보는 중이면 그 사실과 [전체 상호에서 찾기] 버튼을 보여준다
 function ssScopeBar() {
-  if (ss.tab !== 'product' || !ss.companyId) return '';
-  return `<p class="ss-scope"><b>${esc(ss.companyName)}</b>의 제품만 보는 중
-    <button type="button" id="ssAllCompanies" class="link-btn">전체 상호에서 찾기</button></p>`;
+  const q = $('#ssInput').value.trim();
+  const noMatch =
+    q && !ss.matched
+      ? `<p class="ss-scope ss-nomatch">'<b>${esc(q)}</b>'로 시작하는 ${ss.tab === 'company' ? '거래처' : '품목'}가 없습니다 ·
+         <b>Enter</b>를 누르면 적은 그대로 씁니다 (저장할 때 새로 등록)</p>`
+      : '';
+  const scope =
+    ss.tab === 'product' && ss.companyId
+      ? `<p class="ss-scope"><b>${esc(ss.companyName)}</b>의 품목만 보는 중
+         <button type="button" id="ssAllCompanies" class="link-btn">전체 거래처에서 찾기</button></p>`
+      : '';
+  return noMatch + scope;
 }
 
 function ssRender() {
@@ -2316,7 +2374,7 @@ function ssRender() {
       )
       .join('');
   }
-  if (ss.tab === 'product') box.insertAdjacentHTML('afterbegin', ssScopeBar());
+  box.insertAdjacentHTML('afterbegin', ssScopeBar());
   bindSsScopeBar();
   const selEl = box.querySelector('.ss-item.sel, .ss-row.sel');
   if (selEl) selEl.scrollIntoView({ block: 'nearest' });
@@ -2469,12 +2527,12 @@ $('#ssInput').addEventListener('keydown', (e) => {
     ssRender();
   } else if (e.key === 'Enter') {
     e.preventDefault();
-    if (ss.items.length) ssPick(ss.sel);
-    else ssApplyText(); // 결과가 없으면 적은 글자를 그대로 칸에 넣는다
+    if (ss.items.length && ss.matched) ssPick(ss.sel);
+    else ssApplyText(); // 맞는 항목이 없으면 적은 글자를 그대로 칸에 넣는다
   }
 });
 
-// ESC: 거래관리 어디서든 검색 시트 열기/닫기 (팝업·명세표가 열려 있을 땐 제외)
+// ESC: 거래관리 어디서든 검색 시트 열기/닫기 (칸 안에서는 Tab이 기본)
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || state.tab !== 'transactions') return;
   if (!$('#modal').classList.contains('hidden')) return;
@@ -2509,10 +2567,10 @@ async function openTxForm(tx) {
         <label>거래일자<input name="date" type="date" value="${esc(tx ? tx.date : today())}"></label>
         <label>구분
           <select name="kind">
-            ${Object.entries(KIND_ENTRY_LABEL)
-              .map(([v, l]) => {
-                const cur = tx ? (tx.kind === 'purchase' ? 'purchase' : 'sale') : state.entryKind;
-                return `<option value="${v}" ${v === cur ? 'selected' : ''}>${l}</option>`;
+            ${KIND_LIST.filter((k) => !MONEY_ONLY.includes(k))
+              .map((k) => {
+                const cur = tx ? kindOf(tx.kind) : state.entryKind;
+                return `<option value="${k}" ${k === cur ? 'selected' : ''}>${KINDS[k].label} — ${KINDS[k].help}</option>`;
               })
               .join('')}
           </select>
@@ -2558,17 +2616,6 @@ async function openTxForm(tx) {
       $('.i-spec', tr).value = p.spec;
       $('.i-price', tr).value = p.price;
       recompute();
-    });
-    tr.addEventListener('keydown', (e) => {
-      if (e.key === '=' && e.target.tagName === 'INPUT') {
-        e.preventDefault();
-        const el = $('.i-price', tr);
-        const v = Number(el.value) || 0;
-        if (v !== 0) {
-          el.value = -v;
-          recompute();
-        }
-      }
     });
     $('#itemRows').appendChild(tr);
     recompute();
@@ -2619,7 +2666,7 @@ async function openTxForm(tx) {
     const body = {
       companyId: Number(form.companyId.value),
       date: form.date.value,
-      kind: form.kind.value === 'purchase' ? 'purchase' : 'sale',
+      kind: kindOf(form.kind.value),
       vatMode: form.vatMode.value,
       items,
       paid: 0,
@@ -2672,8 +2719,8 @@ function partyTableEditable(c) {
 // 체크한 여러 거래를 한 장의 거래명세표로 묶는다 (같은 상호끼리만)
 function openBundleStatement() {
   const sel = txCache.filter((t) => checkedTxIds.has('t' + t.id));
-  const list = sel.filter((t) => t.kind !== 'purchase').sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
-  if (!list.length) return toast('매출 줄을 골라 주세요 (매입은 명세표를 만들지 않습니다).');
+  const list = sel.filter((t) => OUT_KINDS.includes(kindOf(t.kind))).sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
+  if (!list.length) return toast('매출·외출 줄을 골라 주세요 (물건이 나간 거래만 명세표를 만듭니다).');
   const companyIds = [...new Set(list.map((t) => t.companyId))];
   if (companyIds.length > 1) return toast('한 상호의 거래만 묶을 수 있습니다. 상호 하나만 골라 주세요.');
 
@@ -3023,13 +3070,13 @@ const TOUR_STEPS = [
   {
     sel: '#txRows tr.row-new td[data-f="company"]',
     title: '상호는 그냥 적으면 등록됩니다',
-    body: '상호명을 그대로 적으면 됩니다. 처음 보는 이름이면 자동으로 새로 등록되니 미리 만들어 둘 필요가 없습니다. 찾아서 고르고 싶으면 몇 글자만 적고 ESC를 누르세요 — 그 글자로 시작하는 상호가 아래에 뜹니다. 한 번 정하면 계속 유지됩니다.',
+    body: '상호명을 그대로 적으면 됩니다. 처음 보는 이름이면 자동으로 새로 등록되니 미리 만들어 둘 필요가 없습니다. 찾아서 고르고 싶으면 몇 글자만 적고 Tab을 누르세요 — 전체 거래처가 가나다순으로 뜨고 그 글자로 시작하는 곳에 커서가 가 있습니다. 한 번 정하면 계속 유지됩니다.',
     pos: 'top',
   },
   {
     sel: '#txRows tr.row-new td[data-f="name"]',
     title: '품명도 자동으로 쌓입니다',
-    body: '품명을 적으면 그대로 제품으로 등록되고, 단가를 바꿔 적으면 최신 단가로 갱신됩니다. 예전에 팔던 걸 찾을 땐 몇 글자 적고 ESC를 누르세요 — 고르면 규격·단가까지 채워집니다. 같은 걸 또 적을 땐 품명을 비워두면 직전 품목이 그대로 들어갑니다.',
+    body: '품명을 적으면 그대로 제품으로 등록되고, 단가를 바꿔 적으면 최신 단가로 갱신됩니다. 예전에 팔던 걸 찾을 땐 몇 글자 적고 Tab을 누르세요 — 고르면 규격·단가까지 채워집니다. 같은 걸 또 적을 땐 품명을 비워두면 직전 품목이 그대로 들어갑니다.',
     pos: 'top',
   },
   {
@@ -3053,7 +3100,7 @@ const TOUR_STEPS = [
   },
   {
     sel: '#btnQuickSearch',
-    title: 'ESC 로 빠른 검색',
+    title: 'Tab 으로 빠른 검색',
     body: '커서가 상호 칸에 있으면 상호만, 품명 칸에 있으면 제품만 찾아줍니다. 칸에 적어둔 글자가 검색어로 들어가고, 그 글자로 시작하는 것부터 보여줍니다. 고르면 입력 줄에 바로 채워집니다.',
     pos: 'left',
   },
