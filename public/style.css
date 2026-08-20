@@ -317,7 +317,13 @@ form label input, form label select { margin-top: 0.2rem; font-weight: 400; }
   white-space: nowrap;
 }
 .kind-sale { color: var(--accent-dark); background: #eff6ff; border-color: #bfdbfe; }
+.kind-csale { color: #1e40af; background: #eef2ff; border-color: #c7d2fe; }
 .kind-buy { color: #b45309; background: #fff7ed; border-color: #fed7aa; }
+.kind-cbuy { color: #92400e; background: #fefce8; border-color: #fde68a; }
+.kind-in { color: #15803d; background: #f0fdf4; border-color: #bbf7d0; }
+.kind-out { color: #b91c1c; background: #fef2f2; border-color: #fecaca; }
+#txRows tr.row-money td { background: #f7fbff; }
+#txRows tr.row-money.row-checked td { background: #fde68a; }
 #txRows td.kind-cell[data-f="kind"] { cursor: pointer; }
 #txRows tr.row-buy td { background: #fffaf3; }
 #txRows tr.row-buy.row-checked td { background: #fde68a; }
@@ -524,6 +530,7 @@ body.sheet-open .fab-help { display: none; }
   align-items: baseline;
 }
 .ss-scope b { color: var(--text); }
+.ss-nomatch { color: var(--warn); background: #fffbeb; border-radius: 6px; padding: 0.35rem 0.5rem; }
 
 .ss-row { cursor: pointer; }
 .ss-row.sel, .ss-row:hover { background: #dbeafe; box-shadow: inset 4px 0 0 var(--accent); }
@@ -847,9 +854,17 @@ body.easy .fab, body.easy .fab-help { display: none; }
 
   /* 카드형에서는 색을 칸이 아니라 줄 전체에 칠한다 (칸마다 네모가 생기지 않게) */
   #txRows tr.row-buy { background: #fffaf3; }
+  #txRows tr.row-money { background: #f7fbff; }
   #txRows tr.row-checked { background: #fde68a; }
   #txRows tr.row-buy td,
+  #txRows tr.row-money td,
   #txRows tr.row-checked td { background: none; }
+
+  /* 입금·출금 줄에는 품목·수량·단가가 없다 — 빈 라벨을 감춘다 */
+  #txRows tr.row-money td[data-f="name"],
+  #txRows tr.row-money td[data-f="spec"],
+  #txRows tr.row-money td[data-f="qty"],
+  #txRows tr.row-money td[data-f="price"] { display: none; }
 
   .grid-table tbody td,
   .grid-table tbody td[data-f]:not([data-edit]) {
