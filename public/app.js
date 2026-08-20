@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.19.0'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.19.1'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -843,7 +843,7 @@ async function renderTransactions() {
       <p class="summary"><span id="txSummary"></span><span id="selSummary" class="sel-summary"></span></p>
       <div class="table-wrap ledger-wrap">
         <table class="ledger-table grid-table">
-          <thead><tr><th class="chk"></th><th>날짜</th><th>거래처</th><th>품목</th><th>규격</th><th class="num">수량</th><th class="num">단가</th><th class="num">공급가액</th><th>참조</th><th class="num">부가세</th><th class="num">합계</th><th class="actions"></th></tr></thead>
+          <thead><tr><th class="chk"></th><th class="rowno">No</th><th>날짜</th><th>거래처</th><th>품목</th><th>규격</th><th class="num">수량</th><th class="num">단가</th><th class="num">공급가액</th><th>참조</th><th class="num">부가세</th><th class="num">합계</th><th>비고</th><th class="actions"></th></tr></thead>
           <tbody id="txRows"></tbody>
         </table>
       </div>
@@ -1439,7 +1439,7 @@ function applyEntryCompany(c) {
 }
 
 /* ─────────────── 엑셀식 셀 입력 그리드 ─────────────── */
-const GRID_COLS = ['date', 'company', 'name', 'spec', 'qty', 'price'];
+const GRID_COLS = ['date', 'company', 'name', 'spec', 'qty', 'price', 'memo'];
 const BLANK_ROWS = 1;               // 맨 아래에 두는 빈 줄 (항상 한 줄만)
 
 let gridRows = [];                  // 화면에 보이는 줄 (거래·빈 줄)
@@ -1450,7 +1450,7 @@ const gridCursor = { r: 0, field: 'company' };
 // 빈 줄에는 마지막으로 쓴 날짜를 미리 채워 둔다 (없으면 오늘)
 const blankRow = () => ({
   kind: 'new', txKind: state.entryKind, date: state.entryDate || today(),
-  companyName: '', name: '', spec: '', qty: '', price: '', paid: '',
+  companyName: '', name: '', spec: '', qty: '', price: '', paid: '', supply: '', memo: '',
 });
 
 function rowFromTx(t) {
@@ -1465,7 +1465,7 @@ function rowFromTx(t) {
     spec: multi ? '' : it.spec,
     qty: multi || !items.length ? '' : it.qty,
     price: multi || !items.length ? '' : it.price,
-    supply: t.supplyTotal, total: t.total, tax: t.taxTotal, paid: t.paid,
+    supply: t.supplyTotal, total: t.total, tax: t.taxTotal, paid: t.paid, memo: t.memo || '',
   };
 }
 
@@ -1477,13 +1477,13 @@ function newRowCalc(row) {
 
 function cellText(row, field) {
   const v = row[field];
-  if (field === 'date' || field === 'company' || field === 'name' || field === 'spec') {
+  if (['date', 'company', 'name', 'spec', 'memo'].includes(field)) {
     return field === 'company' ? row.companyName || '' : String(v == null ? '' : v);
   }
   return v === '' || v == null ? '' : won(v);
 }
 
-const CELL_PH = { date: '날짜', company: '상호', name: '품명', spec: '규격', qty: '수량', price: '단가' };
+const CELL_PH = { date: '날짜', company: '상호', name: '품명', spec: '규격', qty: '수량', price: '단가', memo: '비고' };
 
 function rowHtml(row, i) {
   const isNew = row.kind === 'new';
@@ -1509,6 +1509,7 @@ function rowHtml(row, i) {
   ].filter(Boolean).join(' ');
   return `<tr data-r="${i}" data-kind="${row.kind}" data-id="${row.id || ''}" class="${rowCls}">
     <td class="chk">${key ? `<input type="checkbox" ${checked ? 'checked' : ''}>` : ''}</td>
+    <td class="rowno">${isNew ? '' : i + 1}</td>
     ${cell('date')}
     ${cell('company', 'cell-company')}
     ${cell('name')}
@@ -1523,6 +1524,7 @@ function rowHtml(row, i) {
         ? num(row.supply === '' || row.supply == null ? '' : row.supply, Number(row.supply) < 0 ? 'neg' : '', 'total')
         : num(blankNum ? '' : calc.total, calc.total < 0 ? 'neg' : '', 'total')
     }
+    ${cell('memo', 'cell-memo')}
     <td class="actions">${
       row.kind === 'tx'
         ? `${OUT_KINDS.includes(kind) ? `<button data-act="sheet" data-id="${row.id}">명세표</button>` : ''}<button data-act="del" data-id="${row.id}" class="danger" title="삭제">✕</button>`
@@ -1839,7 +1841,7 @@ function txPayload(row, isNew) {
     companyName: row.companyName,
     date: row.date || today(),
     kind,
-    memo: (row.tx && row.tx.memo) || '',
+    memo: row.memo != null ? String(row.memo) : (row.tx && row.tx.memo) || '',
   };
   if (isMoneyOnly(kind)) {
     const size = Math.abs(Number(row.supply) || 0);
@@ -1951,8 +1953,8 @@ function updateSummaryOnly() {
 /* ── 셀 사이 이동 ── */
 function editableFields(row) {
   if (!row) return GRID_COLS;
-  if (isMoneyOnly(row.txKind)) return ['date', 'company', 'supply']; // 입금·출금은 금액만
-  if (row.kind === 'tx' && row.multi) return ['date', 'company'];    // 품목은 팝업에서 고친다
+  if (isMoneyOnly(row.txKind)) return ['date', 'company', 'supply', 'memo']; // 입금·출금은 금액만
+  if (row.kind === 'tx' && row.multi) return ['date', 'company', 'memo'];    // 품목은 팝업에서 고친다
   return GRID_COLS;
 }
 
