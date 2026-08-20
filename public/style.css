@@ -203,13 +203,24 @@ form label input, form label select { margin-top: 0.2rem; font-weight: 400; }
 
 /* 행 체크 */
 .chk { width: 2rem; text-align: center; }
-.chk input { width: auto; cursor: pointer; }
+.chk input { width: 1.15rem; height: 1.15rem; cursor: pointer; accent-color: var(--accent); }
 /* 포인터는 실제로 눌러서 되는 곳에만: 입력 칸(cell)·체크 칸·버튼.
    자동 계산 칸은 기본 화살표라 눌러도 되는 칸과 구분된다 */
 #txRows td.chk:has(input) { cursor: pointer; }
-#txRows tr.row-checked td { background: #fefce8; }
+#txRows tr.row-checked td { background: #fde68a; }
+#txRows tr.row-checked td.kind-cell .kind-tag { background: #fff; }
 #txRows tr.row-pointer { outline: 2px solid var(--accent); outline-offset: -2px; }
 .sel-summary { color: var(--accent-dark); font-weight: 700; }
+.bundle-btn {
+  margin-left: 0.4rem;
+  padding: 0.2rem 0.6rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--accent-dark);
+  border-color: #93c5fd;
+  background: #eff6ff;
+}
+.bundle-btn:hover { background: #dbeafe; }
 
 /* 검색(필터) 입력 */
 .section-head .date-filter { flex: 0 1 auto; width: auto; }
@@ -260,7 +271,6 @@ form label input, form label select { margin-top: 0.2rem; font-weight: 400; }
 
 /* 거래처원장 */
 .ledger-doc { width: 100%; }
-.ledger-doc tbody tr.row-pay td { background: #f0fdf4; }
 .ledger-doc .carry-row td { background: #f8fafc; font-weight: 700; }
 .ledger-doc td, .ledger-doc th { white-space: nowrap; }
 .ledger-doc td:nth-child(2) { white-space: normal; }
@@ -308,30 +318,13 @@ form label input, form label select { margin-top: 0.2rem; font-weight: 400; }
 }
 .kind-sale { color: var(--accent-dark); background: #eff6ff; border-color: #bfdbfe; }
 .kind-buy { color: #b45309; background: #fff7ed; border-color: #fed7aa; }
-.kind-pay { color: #15803d; background: #f0fdf4; border-color: #bbf7d0; }
 #txRows td.kind-cell[data-f="kind"] { cursor: pointer; }
 #txRows tr.row-buy td { background: #fffaf3; }
-#txRows tr.row-buy.row-checked td { background: #fefce8; }
+#txRows tr.row-buy.row-checked td { background: #fde68a; }
 .ledger-doc tbody tr.row-buy td { background: #fffaf3; }
 
-/* 입금(수금) 줄 */
-.pay-btn { color: #15803d; border-color: #86efac; font-weight: 700; }
-.pay-btn:hover { background: #f0fdf4; }
-#txRows tr.row-pay td { background: #f0fdf4; }
-#txRows tr.row-pay.row-checked td { background: #fefce8; }
-.pay-label { color: #15803d; font-weight: 700; }
-.easy-item-pay { border-color: #86efac; background: #f0fdf4; }
-.easy-pay-btn {
-  width: 100%;
-  font-size: 1.2rem;
-  font-weight: 700;
-  padding: 0.85rem;
-  border-width: 2px;
-  border-radius: 12px;
-  color: #15803d;
-  border-color: #86efac;
-  margin-bottom: 1rem;
-}
+/* 매입 카드 (큰 글씨 모드) */
+.easy-item-buy { border-color: #fed7aa; background: #fffaf3; }
 
 /* 커서 고정 */
 .pin-btn { padding: 0.3rem 0.5rem; margin-right: 0.2rem; color: var(--sub); }
@@ -386,7 +379,7 @@ input.pinned, select.pinned {
   cursor: pointer;
   white-space: nowrap;
 }
-.ac-item.sel, .ac-item:hover { background: #eff6ff; }
+.ac-item.sel, .ac-item:hover { background: #dbeafe; box-shadow: inset 3px 0 0 var(--accent); font-weight: 600; }
 .ac-item .ac-price { margin-left: auto; color: var(--sub); font-size: 0.82rem; }
 
 /* 거래 품목 입력 표 */
@@ -495,7 +488,7 @@ body.sheet-open .fab-help { display: none; }
   border-radius: 8px;
   cursor: pointer;
 }
-.ss-item.sel, .ss-item:hover { background: #eff6ff; }
+.ss-item.sel, .ss-item:hover { background: #dbeafe; box-shadow: inset 4px 0 0 var(--accent); font-weight: 600; }
 .ss-item .right { margin-left: auto; font-size: 0.85rem; color: var(--sub); white-space: nowrap; }
 .ss-hint { margin: 0.4rem 0 0; }
 
@@ -533,7 +526,8 @@ body.sheet-open .fab-help { display: none; }
 .ss-scope b { color: var(--text); }
 
 .ss-row { cursor: pointer; }
-.ss-row.sel, .ss-row:hover { background: #eff6ff; }
+.ss-row.sel, .ss-row:hover { background: #dbeafe; box-shadow: inset 4px 0 0 var(--accent); }
+.ss-row.sel input { background: #fff; border-color: #93c5fd; }
 .ss-row input { padding: 0.35rem 0.45rem; font-size: 0.86rem; }
 .ss-row .w-out { font-size: 0.82rem; }
 .ss-row .ss-pick { padding: 0.35rem 0.5rem; font-size: 0.82rem; }
@@ -853,10 +847,8 @@ body.easy .fab, body.easy .fab-help { display: none; }
 
   /* 카드형에서는 색을 칸이 아니라 줄 전체에 칠한다 (칸마다 네모가 생기지 않게) */
   #txRows tr.row-buy { background: #fffaf3; }
-  #txRows tr.row-pay { background: #f0fdf4; }
-  #txRows tr.row-checked { background: #fefce8; }
+  #txRows tr.row-checked { background: #fde68a; }
   #txRows tr.row-buy td,
-  #txRows tr.row-pay td,
   #txRows tr.row-checked td { background: none; }
 
   .grid-table tbody td,
@@ -878,8 +870,6 @@ body.easy .fab, body.easy .fab-help { display: none; }
   .grid-table td[data-f="name"] { flex: 0 0 100%; font-weight: 600; }
   .grid-table td[data-f="qty"]::before { content: '수량 '; font-size: 0.75rem; color: var(--sub); }
   .grid-table td[data-f="price"]::before { content: '단가 '; font-size: 0.75rem; color: var(--sub); }
-  .grid-table td[data-f="paid"]::before { content: '입금 '; font-size: 0.75rem; color: var(--sub); }
-  .grid-table td[data-f="balance"]::before { content: '잔액 '; font-size: 0.75rem; color: var(--sub); }
   .grid-table td[data-f="spec"]:not(:empty)::before { content: '규격 '; font-size: 0.75rem; color: var(--sub); }
   .grid-table tr:not(.row-new) td[data-f="spec"]:empty { display: none; }
 
@@ -898,8 +888,6 @@ body.easy .fab, body.easy .fab-help { display: none; }
   .grid-table td[data-f="qty"] { order: 7; }
   .grid-table td[data-f="price"] { order: 8; }
   .grid-table td[data-f="total"] { order: 9; }
-  .grid-table td[data-f="paid"] { order: 10; }
-  .grid-table td[data-f="balance"] { order: 11; }
   .grid-table td.actions button { padding: 0.3rem 0.5rem; font-size: 0.8rem; margin: 0; }
   .grid-table td.actions button[data-act="sheet"] { font-size: 0; padding: 0.3rem 0.55rem; }
   .grid-table td.actions button[data-act="sheet"]::after { content: '📄'; font-size: 1rem; }
@@ -915,18 +903,15 @@ body.easy .fab, body.easy .fab-help { display: none; }
   .grid-table tr.row-new td[data-f="qty"]:empty::before,
   .grid-table tr.row-new td[data-f="price"]:empty::before { color: #b9c0cb; }
 
-  /* 빈 줄은 한 줄로 짧게 (규격·입금은 저장한 뒤 눌러서 채운다) */
+  /* 빈 줄은 한 줄로 짧게 (규격은 적기 시작하면 나온다) */
   .grid-table tr.row-new { background: #fbfdff; }
   .grid-table tr.row-new td[data-f="name"] { flex: 1 1 auto; }
   .grid-table tr.row-new td[data-f="spec"],
-  .grid-table tr.row-new td[data-f="paid"],
   .grid-table tr.row-new td[data-f="total"],
-  .grid-table tr.row-new td[data-f="balance"],
   .grid-table tr.row-new td.chk,
   .grid-table tr.row-new td.actions { display: none; }
   /* 적기 시작하면 필요한 칸이 모두 나온다 */
   .grid-table tr.row-new:has(td.cell-editing) td[data-f="spec"],
-  .grid-table tr.row-new:has(td.cell-editing) td[data-f="paid"],
   .grid-table tr.row-new:has(td.cell-editing) td[data-f="total"] { display: block; }
   .grid-table tr.row-new:has(td.cell-editing) td[data-f="name"] { flex: 0 0 100%; }
 
