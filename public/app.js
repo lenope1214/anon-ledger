@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.16.1'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.16.2'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -1584,7 +1584,23 @@ function rowHtml(row, i) {
 
 function paintRow(i) {
   const tr = $(`#txRows tr[data-r="${i}"]`);
-  if (tr) tr.outerHTML = rowHtml(gridRows[i], i);
+  if (!tr) return;
+  // 그 줄에서 뭔가 적는 중이면 그 칸만 남기고 나머지만 새로 그린다 (입력창이 사라지지 않게)
+  if (gridEdit && gridEdit.r === i && gridEdit.td && gridEdit.td.isConnected) {
+    const holder = document.createElement('tbody');
+    holder.innerHTML = rowHtml(gridRows[i], i);
+    const fresh = holder.firstElementChild;
+    if (!fresh) return;
+    tr.className = fresh.className;
+    const olds = [...tr.children];
+    const news = [...fresh.children];
+    olds.forEach((td, k) => {
+      if (td === gridEdit.td || !news[k]) return;
+      td.replaceWith(news[k]);
+    });
+    return;
+  }
+  tr.outerHTML = rowHtml(gridRows[i], i);
 }
 
 const blankCount = () => gridRows.reduce((s, r) => s + (r.kind === 'new' ? 1 : 0), 0);
@@ -1806,14 +1822,15 @@ function closeCellEditor() {
 }
 
 // 편집 중인 값을 줄에 반영한다 (leaveRow=true면 줄을 벗어나는 상황)
-async function commitCell(mayLeave) {
-  if (!gridEdit) return;
+// 적던 값을 그 자리에서 화면에 반영한다 (저장은 뒤에서 따로)
+function applyCellValue() {
+  if (!gridEdit) return null;
   const { r, field, input } = gridEdit;
   const row = gridRows[r];
   const value = input.value.trim();
   gridEdit = null;
+  if (!row) return null;
 
-  if (!row) return;
   if (field === 'company') {
     row.companyName = value;
     const found = state.companies.find((c) => c.name.toLowerCase() === value.toLowerCase());
@@ -1825,10 +1842,63 @@ async function commitCell(mayLeave) {
     row[field] = value;
   }
   if (row.kind === 'new' && field === 'date') state.entryDate = value;
-
+  // 저장된 줄은 서버 응답을 기다리지 않고 화면 숫자를 먼저 다시 계산한다
+  if (row.kind === 'tx' && !row.multi) {
+    const c = calcItem(Number(row.qty) || 0, Number(row.price) || 0, (row.tx && row.tx.vatMode) || 'separate');
+    row.supply = c.supply;
+    row.tax = c.tax;
+    row.total = c.supply + c.tax;
+  }
   paintRow(r);
-  if (row.kind === 'tx' || row.kind === 'pay') await saveExistingRow(row, r);
-  else if (mayLeave) await saveNewRowIfReady(r);
+  updateSummaryOnly();
+  return r;
+}
+
+// 상호 목록(미수금 합계 포함) 다시 읽기 — 연달아 저장할 땐 한 번만
+let companyRefreshTimer = null;
+function scheduleCompanyRefresh() {
+  clearTimeout(companyRefreshTimer);
+  companyRefreshTimer = setTimeout(() => {
+    refreshCompanies().catch(() => {});
+  }, 600);
+}
+
+// 저장은 순서대로, 화면 조작과 따로 진행한다
+let gridSaveChain = Promise.resolve();
+const pendingSaves = new Map(); // 줄마다 아직 끝나지 않은 저장 수
+const isLastPendingSave = (r) => (pendingSaves.get(r) || 0) <= 1;
+
+function queueRowSave(r, mayLeave) {
+  if (r == null || !gridRows[r]) return Promise.resolve();
+  pendingSaves.set(r, (pendingSaves.get(r) || 0) + 1);
+  gridSaveChain = gridSaveChain.then(async () => {
+    try {
+      const row = gridRows[r];
+      if (!row) return;
+      if (row.kind === 'tx' || row.kind === 'pay') await saveExistingRow(row, r);
+      else if (mayLeave) await saveNewRowIfReady(r);
+    } finally {
+      const left = (pendingSaves.get(r) || 1) - 1;
+      if (left > 0) pendingSaves.set(r, left);
+      else pendingSaves.delete(r);
+    }
+  });
+  return gridSaveChain;
+}
+
+// 값을 반영하고 저장이 끝날 때까지 기다린다 (칸을 떠날 때·검색 등)
+async function commitCell(mayLeave) {
+  const r = applyCellValue();
+  if (r == null) return;
+  await queueRowSave(r, mayLeave);
+  updateSaveBar();
+}
+
+// 값만 바로 반영하고 저장은 뒤에서 — 칸 이동이 기다리지 않게 한다
+function commitCellNow(mayLeave) {
+  const r = applyCellValue();
+  if (r == null) return;
+  queueRowSave(r, mayLeave);
   updateSaveBar();
 }
 
@@ -1851,18 +1921,21 @@ async function saveExistingRow(row, r, keepEditing) {
         vatMode: row.tx.vatMode, items,
         paid: Number(row.paid) || 0, memo: row.tx.memo,
       });
-      Object.assign(row, rowFromTx(Object.assign({ companyName: row.companyName }, saved)));
-      row.txKind = saved.kind === 'purchase' ? 'purchase' : 'sale';
+      if (isLastPendingSave(r)) { // 뒤이어 저장할 게 남아 있으면 화면 값을 건드리지 않는다
+        Object.assign(row, rowFromTx(Object.assign({ companyName: row.companyName }, saved)));
+        row.txKind = saved.kind === 'purchase' ? 'purchase' : 'sale';
+      }
     }
     toast('고쳤습니다.');
-    await refreshCompanies();
+    scheduleCompanyRefresh();
     clearProductsCache();
     if (keepEditing) paintKindCell(r); // 적는 중이면 입력창을 지우지 않는다
     else paintRow(r);
     updateSummaryOnly();
   } catch (e) {
-    alert(e.message);
-    drawTxRows();
+    // 저장은 뒤에서 돌아가므로 알림창 대신 안내를 띄우고, 적는 중이 아닐 때만 다시 읽는다
+    toast('⚠ 저장하지 못했습니다 — ' + (e.message || '연결을 확인하세요'));
+    if (!gridEdit) drawTxRows();
   }
 }
 
@@ -1885,7 +1958,9 @@ async function saveNewRowIfReady(r) {
       paid: Number(row.paid) || 0,
       memo: '',
     });
-    await refreshCompanies();
+    // 새로 만들어진 상호면 목록을 바로 읽어와야 이름이 붙는다
+    if (state.companies.some((x) => x.id === tx.companyId)) scheduleCompanyRefresh();
+    else await refreshCompanies();
     clearProductsCache();
     txCache = [tx, ...txCache];
     const c = state.companies.find((x) => x.id === tx.companyId);
@@ -1898,7 +1973,7 @@ async function saveNewRowIfReady(r) {
     toast('저장했습니다.');
     return true;
   } catch (e) {
-    alert(e.message);
+    toast('⚠ 저장하지 못했습니다 — ' + (e.message || '연결을 확인하세요'));
     return false;
   }
 }
@@ -1949,7 +2024,7 @@ function editableFields(row) {
   return GRID_COLS;
 }
 
-async function moveCell(dr, dfield) {
+function moveCell(dr, dfield) {
   if (!gridEdit) return;
   const { r, field } = gridEdit;
   const row = gridRows[r];
@@ -1961,8 +2036,8 @@ async function moveCell(dr, dfield) {
     const i = fields.indexOf(field);
     const ni = i + dfield;
     if (ni < 0 || ni >= fields.length) {
-      if (dfield > 0) { // 줄 끝 → 저장하고 다음 줄로
-        await commitCell(true);
+      if (dfield > 0) { // 줄 끝 → 저장을 걸어두고 바로 다음 줄로
+        commitCellNow(true);
         return startRowEdit(r + 1);
       }
       nr = r - 1;
@@ -1976,7 +2051,7 @@ async function moveCell(dr, dfield) {
   if (nr < 0 || nr >= gridRows.length) return;
 
   const leaving = nr !== r;
-  await commitCell(leaving);
+  commitCellNow(leaving); // 저장을 기다리지 않는다 — 칸은 바로 옮긴다
   const target = gridRows[nr];
   const tf = editableFields(target).includes(nf) ? nf : editableFields(target)[0];
   openCellEditor(nr, tf);
