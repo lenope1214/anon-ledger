@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.16.0'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.16.1'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -1419,13 +1419,23 @@ const isLastEntryField = (el) => {
 };
 
 // 글자를 고치는 중인지 판단 — 커서가 끝(또는 처음)이 아니면 방향키는 글자 이동에 쓴다
+// 셀에 적은 숫자 읽기 (쉼표·공백을 걸러낸다)
+const cellNum = (v) => Number(String(v).replace(/[,\s]/g, '')) || 0;
+
+// 방향키로 칸을 옮길지, 글자 사이에서 커서만 옮길지 정한다
 function caretAtEdge(el, dir) {
   if (!el || el.tagName !== 'INPUT') return true;
-  if (['number', 'date', 'time'].includes(el.type)) return true; // 이런 칸은 바로 이동
+  if (['date', 'time'].includes(el.type)) return true; // 날짜 칸은 바로 이동
+  let pos = null;
+  let end = null;
+  try {
+    pos = el.selectionStart;
+    end = el.selectionEnd;
+  } catch (e) { /* 커서 위치를 알 수 없는 칸 */ }
+  if (pos == null || end == null) return true;
+  if (pos !== end) return false; // 글자가 선택된 상태면 먼저 선택만 푼다 (칸 이동 X)
   const len = el.value.length;
-  const pos = el.selectionStart == null ? len : el.selectionStart;
-  const end = el.selectionEnd == null ? len : el.selectionEnd;
-  return dir > 0 ? pos === len && end === len : pos === 0 && end === 0;
+  return dir > 0 ? pos === len : pos === 0;
 }
 
 // 입력 행/폼 안에서의 키 처리 (Enter: 다음 칸 → 마지막 칸에서 저장, ←→: 칸 이동)
@@ -1686,12 +1696,32 @@ function bindGridEvents(tbody) {
 
 // 매출 ↔ 매입 뒤집기 (저장된 줄은 바로 다시 저장)
 async function toggleRowKind(r) {
+  return flipRowKind(r, false);
+}
+
+// keepEditing: 셀을 적는 중이면 입력창을 살린 채 구분 표시만 바꾼다
+async function flipRowKind(r, keepEditing) {
   const row = gridRows[r];
   if (!row || row.kind === 'pay') return;
   row.txKind = row.txKind === 'purchase' ? 'sale' : 'purchase';
-  paintRow(r);
-  if (row.kind === 'tx') await saveExistingRow(row, r);
+  if (keepEditing) paintKindCell(r);
+  else paintRow(r);
+  if (row.kind === 'tx') await saveExistingRow(row, r, keepEditing);
   else updateSummaryOnly();
+}
+
+// 줄 전체를 다시 그리지 않고 구분 태그·배경색만 바꾼다 (입력 중에도 안전)
+function paintKindCell(r) {
+  const row = gridRows[r];
+  const tr = $(`#txRows tr[data-r="${r}"]`);
+  if (!row || !tr) return;
+  const buy = row.txKind === 'purchase';
+  const td = tr.querySelector('td.kind-cell');
+  if (td) td.innerHTML = `<span class="kind-tag ${buy ? 'kind-buy' : 'kind-sale'}">${buy ? '매입' : '매출'}</span>`;
+  tr.classList.toggle('row-buy', buy);
+  const sheetBtn = tr.querySelector('button[data-act="sheet"]');
+  if (sheetBtn && buy) sheetBtn.remove(); // 매입 줄에는 명세표가 없다
+  updateSummaryOnly();
 }
 
 async function handleRowAction(btn) {
@@ -1735,9 +1765,12 @@ async function openCellEditor(r, field) {
   input.className = 'cell-input';
   if (field === 'date') input.type = 'date';
   else if (isNum) {
-    input.type = 'number';
+    // type=number는 커서 위치를 알 수 없어 ←/→ 로 글자 사이를 못 움직인다.
+    // 글자 칸으로 두고 inputmode로 숫자 키패드만 띄운다.
+    input.type = 'text';
     input.inputMode = field === 'qty' ? 'decimal' : 'numeric';
-    if (field === 'qty') input.step = 'any';
+    input.autocomplete = 'off';
+    input.classList.add('num');
   }
   const raw = field === 'company' ? row.companyName : row[field];
   input.value = field === 'date' && !raw && row.kind === 'new' ? state.entryDate || today() : raw == null ? '' : raw;
@@ -1787,7 +1820,7 @@ async function commitCell(mayLeave) {
     row.companyId = found ? found.id : 0;
     if (found) state.entryCompanyId = String(found.id);
   } else if (['qty', 'price', 'paid'].includes(field)) {
-    row[field] = value === '' ? '' : Number(value) || 0;
+    row[field] = value === '' ? '' : cellNum(value);
   } else {
     row[field] = value;
   }
@@ -1800,7 +1833,7 @@ async function commitCell(mayLeave) {
 }
 
 // 기존 줄은 셀을 고칠 때마다 바로 저장한다
-async function saveExistingRow(row, r) {
+async function saveExistingRow(row, r, keepEditing) {
   try {
     if (row.kind === 'pay') {
       await api('PUT', '/api/payments/' + row.id, {
@@ -1824,7 +1857,8 @@ async function saveExistingRow(row, r) {
     toast('고쳤습니다.');
     await refreshCompanies();
     clearProductsCache();
-    paintRow(r);
+    if (keepEditing) paintKindCell(r); // 적는 중이면 입력창을 지우지 않는다
+    else paintRow(r);
     updateSummaryOnly();
   } catch (e) {
     alert(e.message);
@@ -1983,9 +2017,12 @@ function onCellKey(e) {
     e.preventDefault();
     moveCell(0, -1);
   } else if (e.key === '=' && ['price', 'paid', 'qty'].includes(field)) {
+    // 숫자 칸에서 = : 매출↔매입을 뒤집고 +/− 부호도 함께 뒤집는다
+    // (품명·상호 같은 글자 칸에서는 '=' 를 그대로 적을 수 있게 둔다)
     e.preventDefault();
-    const v = Number(input.value) || 0;
-    if (v !== 0) input.value = -v;
+    const v = cellNum(input.value);
+    if (v !== 0) input.value = String(-v);
+    flipRowKind(gridEdit.r, true);
   } else if (e.key === 'Escape' && (field === 'company' || field === 'name')) {
     // 한 번의 ESC로 바로 검색 — 한글을 조합하는 중이어도 적은 글자를 그대로 가져간다
     e.preventDefault();
@@ -2095,7 +2132,11 @@ function undoCheckRow() {
 document.addEventListener('keydown', (e) => {
   if (state.tab !== 'transactions' || gridEdit) return;
   if (e.key !== '=' && e.key !== '-' && e.key !== 'Backspace') return;
-  if (e.target.closest('input, select, textarea')) return; // 입력 중일 땐 원래 동작 유지
+  // 입력 중일 땐 원래 동작 유지 — 다만 방금 누른 체크 네모는 예외
+  // (줄을 클릭해 체크하면 그 네모가 포커스를 갖는데, 이때도 '='로 이어서 체크되어야 한다)
+  if (e.target.closest('select, textarea')) return;
+  const inp = e.target.closest('input');
+  if (inp && !(inp.type === 'checkbox' && inp.closest('#txRows'))) return;
   if (!$('#modal').classList.contains('hidden')) return;
   e.preventDefault();
   if (e.key === '=') checkNextRow();
