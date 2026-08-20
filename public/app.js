@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.18.0'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.19.0'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -89,8 +89,10 @@ function toast(msg) {
 }
 
 /* 서버와 동일한 부가세 계산 (미리보기용) */
+// 컴장부와 같은 부호 규칙: 공급가액 = 수량 × 단가 × (−1)
+// 물건이 나가면(수량 −) 받을 돈이라 +, 물건이 들어오면(수량 +) 줄 돈이라 −
 function calcItem(qty, price, vatMode) {
-  const amount = Math.round(qty * price);
+  const amount = -Math.round(qty * price);
   if (vatMode === 'included') {
     const supply = Math.round(amount / 1.1);
     return { supply, tax: amount - supply };
@@ -292,13 +294,13 @@ async function renderCompanyLedger() {
         <td>${esc(r.date)}</td>
         <td>${esc(r.label)}</td>
         <td class="num ${r.amount < 0 ? 'neg' : ''}">${r.buy ? '' : won(r.amount)}</td>
-        <td class="num ${r.amount < 0 ? 'neg' : ''}">${r.buy ? won(r.amount) : ''}</td>
+        <td class="num">${r.buy ? won(Math.abs(r.amount)) : ''}</td>
       </tr>`
     )
     .join('');
 
   const sales = rows.filter((r) => !r.buy).reduce((s, r) => s + r.amount, 0);
-  const bought = rows.filter((r) => r.buy).reduce((s, r) => s + r.amount, 0);
+  const bought = Math.abs(rows.filter((r) => r.buy).reduce((s, r) => s + r.amount, 0));
 
   $('#main').innerHTML = `
     <section class="card">
@@ -383,13 +385,13 @@ async function renderReports() {
     for (let m = 1; m <= 12; m++) {
       const key = `${y}-${String(m).padStart(2, '0')}`;
       const sale = sales.filter((t) => t.date.startsWith(key)).reduce((s, t) => s + t.total, 0);
-      const buy = buys.filter((t) => t.date.startsWith(key)).reduce((s, t) => s + t.total, 0);
+      const buy = Math.abs(buys.filter((t) => t.date.startsWith(key)).reduce((s, t) => s + t.total, 0));
       if (!sale && !buy) continue;
       cum += sale - buy;
       rows.push([`${m}월`, won(sale), won(buy), won(sale - buy), won(cum)]);
     }
     const saleSum = sales.filter((t) => t.date.startsWith(y)).reduce((s, t) => s + t.total, 0);
-    const buySum = buys.filter((t) => t.date.startsWith(y)).reduce((s, t) => s + t.total, 0);
+    const buySum = Math.abs(buys.filter((t) => t.date.startsWith(y)).reduce((s, t) => s + t.total, 0));
     table = rows.length
       ? plainTable(['월', '매출', '매입', '이익', '누적 이익'], rows, ['합계', won(saleSum), won(buySum), won(saleSum - buySum), ''])
       : '<p class="empty-cell">이 해에 기록된 내역이 없습니다.</p>';
@@ -398,7 +400,7 @@ async function renderReports() {
     const rows = state.companies
       .map((c) => {
         const sale = sales.filter((t) => t.companyId === c.id && t.date.startsWith(y)).reduce((s, t) => s + t.total, 0);
-        const buy = buys.filter((t) => t.companyId === c.id && t.date.startsWith(y)).reduce((s, t) => s + t.total, 0);
+        const buy = Math.abs(buys.filter((t) => t.companyId === c.id && t.date.startsWith(y)).reduce((s, t) => s + t.total, 0));
         const count = txs.filter((t) => t.companyId === c.id && t.date.startsWith(y)).length;
         return { name: c.name, count, sale, buy };
       })
@@ -836,6 +838,7 @@ async function renderTransactions() {
         <button id="btnEasyOn" title="글씨를 크게 해서 하나씩 입력합니다">🔎 큰 글씨</button>
         <button type="button" id="btnPin" class="pin-btn">📌<span id="pinLabel" class="pin-label">커서 고정</span></button>
         <button type="button" id="btnTxCsv">📄 엑셀</button>
+        <button type="button" id="btnFullscreen" title="전체화면으로 크게 보기 (F11과 같음)">⛶ 전체화면</button>
       </div>
       <p class="summary"><span id="txSummary"></span><span id="selSummary" class="sel-summary"></span></p>
       <div class="table-wrap ledger-wrap">
@@ -844,6 +847,7 @@ async function renderTransactions() {
           <tbody id="txRows"></tbody>
         </table>
       </div>
+      <div id="coPanel" class="co-panel"></div>
       <p class="hint sheet-hint">
         <span>빈 칸을 <b>눌러서</b> 적으세요 · 이미 적은 칸도 눌러 고칠 수 있습니다</span>
         <span><b>Enter</b> 다음 칸 · 줄 끝에서 저장</span>
@@ -917,6 +921,7 @@ async function renderTransactions() {
   });
   $('#btnAddTx').addEventListener('click', () => openTxForm(null));
   $('#btnTxCsv').addEventListener('click', exportTransactionsCsv);
+  $('#btnFullscreen').addEventListener('click', toggleFullscreen);
   $('#btnEasyOn').addEventListener('click', () => setEasyMode(true));
   $('#btnQuickSearch').addEventListener('click', toggleSearchSheet);
   $('#btnHelp').addEventListener('click', startTour);
@@ -930,15 +935,11 @@ async function renderTransactions() {
   maybeAutoTour(); // 처음 온 사용자에게 사용법 안내
 }
 
-// 휴대폰에서는 장부가 화면 아래까지 꽉 차게 만든다
-// (페이지와 장부가 따로 스크롤되면 헷갈리므로 스크롤을 장부 하나로 모은다)
+// 장부가 화면 아래까지 꽉 차게 만든다 (컴장부처럼 한 화면을 다 쓰고,
+// 페이지와 장부가 따로 스크롤되지 않도록 스크롤을 장부 하나로 모은다)
 function fitLedgerHeight() {
   const wrap = $('.ledger-wrap');
   if (!wrap) return;
-  if (!window.matchMedia('(max-width: 700px)').matches) {
-    wrap.style.maxHeight = '';
-    return;
-  }
   const rect = wrap.getBoundingClientRect();
   const top = rect.top + window.scrollY;
   // 장부 아래에 있는 것(안내 문구·카드 여백·버전 표시)만큼을 남긴다
@@ -1596,6 +1597,7 @@ async function drawTxRows() {
 
   tbody.innerHTML = gridRows.map((r, i) => rowHtml(r, i)).join('');
   updateSelSummary();
+  drawCompanyPanel(true);
   bindGridEvents(tbody);
   // 새로 적을 수 있는 첫 빈 줄이 보이도록
   const firstBlank = gridRows.findIndex((r) => r.kind === 'new');
@@ -1643,6 +1645,12 @@ async function flipRowKind(r, keepEditing) {
   const row = gridRows[r];
   if (!row) return;
   row.txKind = KINDS[kindOf(row.txKind)].pair;
+  if (isMoneyOnly(row.txKind) && row.supply !== '' && row.supply != null) {
+    // 입금은 +, 출금은 − (컴장부와 같게)
+    const size = Math.abs(Number(row.supply) || 0);
+    row.supply = row.txKind === 'deposit' ? size : -size;
+    row.total = row.supply;
+  }
   if (keepEditing) paintKindCell(r);
   else paintRow(r);
   if (row.kind === 'tx') await saveExistingRow(row, r, keepEditing);
@@ -1717,6 +1725,7 @@ async function openCellEditor(r, field) {
   gridEdit = { r, field, input, td };
   gridCursor.r = r;
   gridCursor.field = field;
+  drawCompanyPanel();
   sheetLastIdx = r;
   updatePointerHighlight();
   updateSaveBar();
@@ -1753,6 +1762,11 @@ function applyCellValue() {
     if (found) state.entryCompanyId = String(found.id);
   } else if (['qty', 'price', 'paid', 'supply'].includes(field)) {
     row[field] = value === '' ? '' : cellNum(value);
+    if (field === 'supply' && isMoneyOnly(row.txKind) && row.supply !== '') {
+      const size = Math.abs(Number(row.supply) || 0);
+      row.supply = kindOf(row.txKind) === 'deposit' ? size : -size;
+      row.total = row.supply;
+    }
   } else {
     row[field] = value;
   }
@@ -1827,10 +1841,14 @@ function txPayload(row, isNew) {
     kind,
     memo: (row.tx && row.tx.memo) || '',
   };
-  if (isMoneyOnly(kind)) return Object.assign(base, { amount: Number(row.supply) || 0, items: [] });
+  if (isMoneyOnly(kind)) {
+    const size = Math.abs(Number(row.supply) || 0);
+    return Object.assign(base, { amount: kind === 'deposit' ? size : -size, items: [] });
+  }
+  const defaultQty = OUT_KINDS.includes(kind) ? -1 : 1; // 나가면 −, 들어오면 +
   const items = row.multi
     ? row.tx.items
-    : [{ name: row.name, spec: row.spec, qty: Number(row.qty) || (isNew ? 1 : 0), price: Number(row.price) || 0 }];
+    : [{ name: row.name, spec: row.spec, qty: Number(row.qty) || (isNew ? defaultQty : 0), price: Number(row.price) || 0 }];
   return Object.assign(base, {
     vatMode: isNew ? state.entryVat : (row.tx && row.tx.vatMode) || state.entryVat,
     items,
@@ -1848,6 +1866,7 @@ async function saveExistingRow(row, r, keepEditing) {
       }
     }
     toast('고쳤습니다.');
+    drawCompanyPanel(true);
     scheduleCompanyRefresh();
     clearProductsCache();
     if (keepEditing) paintKindCell(r); // 적는 중이면 입력창을 지우지 않는다
@@ -1885,6 +1904,7 @@ async function saveNewRowIfReady(r) {
     gridRows[r] = rowFromTx(Object.assign({ companyName: c ? c.name : row.companyName }, tx));
     paintRow(r);
     ensureTrailingBlank(); // 저장된 줄 아래에 새 빈 줄을 하나 만든다
+    drawCompanyPanel(true);
     syncBlankRow();        // 아직 손대지 않은 빈 줄은 방금 쓴 날짜를 따라간다
     updateSummaryOnly();
     toast('저장했습니다.');
@@ -1909,10 +1929,10 @@ function fillNewRowFromLast(row) {
 // 화면에 보이는 줄로 매출·매입·이익을 요약한다
 function summaryText(txRows) {
   const sum = (kinds) => txRows.filter((r) => kinds.includes(kindOf(r.txKind))).reduce((s, r) => s + r.total, 0);
-  const saleTotal = sum(OUT_KINDS);   // 매출 + 외출
-  const buyTotal = sum(IN_KINDS);     // 매입 + 외입
+  const saleTotal = sum(OUT_KINDS);          // 매출 + 외출 (받을 돈이라 +)
+  const buyTotal = Math.abs(sum(IN_KINDS));  // 매입 + 외입 (줄 돈이라 −로 저장 → 크기로 표시)
   const inMoney = sum(['deposit']);
-  const outMoney = sum(['withdraw']);
+  const outMoney = Math.abs(sum(['withdraw']));
   const parts = [`거래 ${txRows.length}건`];
   if (saleTotal || !buyTotal) parts.push(`매출 ${won(saleTotal)}원`);
   if (buyTotal) parts.push(`매입 ${won(buyTotal)}원`);
@@ -2036,7 +2056,7 @@ function updateSelSummary() {
     return;
   }
   const saleSum = sel.filter((t) => OUT_KINDS.includes(kindOf(t.kind))).reduce((s, t) => s + t.total, 0);
-  const buySum = sel.filter((t) => IN_KINDS.includes(kindOf(t.kind))).reduce((s, t) => s + t.total, 0);
+  const buySum = Math.abs(sel.filter((t) => IN_KINDS.includes(kindOf(t.kind))).reduce((s, t) => s + t.total, 0));
   const canBundle = sel.some((t) => OUT_KINDS.includes(kindOf(t.kind)));
   el.innerHTML =
     ` · ☑ 선택 ${sel.length}건:` +
@@ -2296,6 +2316,76 @@ function bindSsScopeBar() {
     ssUpdate();
     $('#ssInput').focus();
   });
+}
+
+// 전체화면 — 장부를 한 화면에 더 많이 보이게 (컴장부처럼 꽉 채워 쓰기)
+function toggleFullscreen() {
+  const el = document.documentElement;
+  if (document.fullscreenElement) {
+    document.exitFullscreen().catch(() => {});
+    return;
+  }
+  const req = el.requestFullscreen || el.webkitRequestFullscreen;
+  if (!req) return toast('이 브라우저에서는 F11 키로 전체화면을 켜 주세요.');
+  req.call(el).catch(() => toast('전체화면을 켤 수 없습니다 — F11 키를 눌러 주세요.'));
+}
+
+document.addEventListener('fullscreenchange', () => {
+  const btn = $('#btnFullscreen');
+  if (btn) btn.textContent = document.fullscreenElement ? '⛶ 전체화면 끄기' : '⛶ 전체화면';
+  if (state.tab === 'transactions') fitLedgerHeight();
+});
+
+// 커서가 있는 줄의 거래처 정보를 장부 아래에 늘 띄운다 (컴장부처럼)
+let coPanelId = null;
+
+function drawCompanyPanel(force) {
+  const box = $('#coPanel');
+  if (!box) return;
+  const row = gridRows[gridCursor.r];
+  const id = row ? Number(row.companyId) || 0 : 0;
+  const c = state.companies.find((x) => x.id === id);
+  if (!force && coPanelId === (c ? c.id : 0)) return;
+  coPanelId = c ? c.id : 0;
+  if (!c) {
+    box.innerHTML = '<span class="co-empty">거래처 칸에 커서를 두면 그 거래처 정보가 여기 나옵니다 · 여기서 바로 고칠 수 있습니다</span>';
+    return;
+  }
+  box.innerHTML =
+    `<span class="co-title">${esc(c.name)}</span>` +
+    COMPANY_FIELDS.filter((f) => f.f !== 'name')
+      .map(
+        (f) => `<label class="co-item"><span>${f.label}</span>
+          <input data-co="${f.f}" data-id="${c.id}" value="${esc(c[f.f])}" placeholder="${esc(f.ph || '')}"></label>`
+      )
+      .join('') +
+    `<label class="co-item co-memo"><span>메모</span>
+      <input data-co="memo" data-id="${c.id}" value="${esc(c.memo)}" placeholder=""></label>` +
+    `<span class="co-sum">매출 ${won(c.total)}원${c.buyTotal ? ` · 매입 ${won(c.buyTotal)}원` : ''}</span>`;
+  $$('#coPanel input').forEach((inp) => {
+    inp.addEventListener('change', () => saveCompanyPanelField(inp));
+    inp.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        inp.blur();
+      }
+    });
+  });
+}
+
+async function saveCompanyPanelField(inp) {
+  const c = state.companies.find((x) => x.id === Number(inp.dataset.id));
+  if (!c) return;
+  c[inp.dataset.co] = inp.value.trim();
+  try {
+    await api('PUT', '/api/companies/' + c.id, {
+      name: c.name, owner: c.owner || '', bizNo: c.bizNo || '',
+      phone: c.phone || '', address: c.address || '', memo: c.memo || '',
+    });
+    toast('거래처 정보를 저장했습니다.');
+  } catch (e) {
+    toast('⚠ 저장하지 못했습니다 — ' + e.message);
+  }
 }
 
 const COMPANY_FIELDS = [
@@ -2756,7 +2846,7 @@ function openStatement(tx) {
         <td class="num">${i + 1}</td>
         <td>${esc(it.name)}</td>
         <td>${esc(it.spec)}</td>
-        <td class="num">${won(it.qty)}</td>
+        <td class="num">${won(Math.abs(it.qty))}</td>
         <td class="num">${won(it.price)}</td>
         <td class="num">${won(it.supply)}</td>
         <td class="num">${won(it.tax)}</td>
@@ -2819,7 +2909,7 @@ function statementText(tx, company) {
     `[거래명세서] ${tx.date}`,
     `${company.name} 귀하`,
     '',
-    ...tx.items.map((it) => `· ${it.name}${it.spec ? '(' + it.spec + ')' : ''} ${won(it.qty)}개 x ${won(it.price)}원 = ${won(it.supply + it.tax)}원`),
+    ...tx.items.map((it) => `· ${it.name}${it.spec ? '(' + it.spec + ')' : ''} ${won(Math.abs(it.qty))}개 x ${won(it.price)}원 = ${won(it.supply + it.tax)}원`),
     '',
     `공급가액 ${won(tx.supplyTotal)}원 / 세액 ${won(tx.taxTotal)}원`,
     `합계 ${won(tx.total)}원`,
