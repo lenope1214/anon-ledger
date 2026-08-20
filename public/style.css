@@ -308,6 +308,8 @@ form label input, form label select { margin-top: 0.2rem; font-weight: 400; }
 .grid-table tbody td { height: 1.75rem; }
 
 /* 매출·매입 구분 */
+.rowno { width: 2.6rem; text-align: right; color: var(--sub); font-size: 0.78rem; }
+.cell-memo { min-width: 7rem; max-width: 14rem; overflow: hidden; text-overflow: ellipsis; }
 .kind-cell { width: 3.2rem; text-align: center; }
 .kind-tag {
   display: inline-block;
@@ -918,6 +920,10 @@ body.easy .fab, body.easy .fab-help { display: none; }
 
   /* 공급가액·세액은 화면이 좁을 때 감춘다 (합계로 충분) */
   .grid-table td[data-f="supply"], .grid-table td[data-f="tax"] { display: none; }
+  .grid-table td.rowno { display: none; }
+  .grid-table td[data-f="memo"]:not(:empty) { flex: 0 0 100%; color: var(--sub); font-size: 0.8rem; }
+  .grid-table td[data-f="memo"]:not(:empty)::before { content: '비고 '; font-size: 0.75rem; }
+  .grid-table tr:not(.row-new) td[data-f="memo"]:empty { display: none; }
 
   .grid-table td.chk { flex: 0 0 1.4rem; }
   /* 명세표·삭제 버튼은 첫 줄(날짜·상호)의 빈 오른쪽에 올려 한 줄을 아낀다 */
@@ -950,11 +956,13 @@ body.easy .fab, body.easy .fab-help { display: none; }
   .grid-table tr.row-new { background: #fbfdff; }
   .grid-table tr.row-new td[data-f="name"] { flex: 1 1 auto; }
   .grid-table tr.row-new td[data-f="spec"],
+  .grid-table tr.row-new td[data-f="memo"],
   .grid-table tr.row-new td[data-f="total"],
   .grid-table tr.row-new td.chk,
   .grid-table tr.row-new td.actions { display: none; }
   /* 적기 시작하면 필요한 칸이 모두 나온다 */
   .grid-table tr.row-new:has(td.cell-editing) td[data-f="spec"],
+  .grid-table tr.row-new:has(td.cell-editing) td[data-f="memo"],
   .grid-table tr.row-new:has(td.cell-editing) td[data-f="total"] { display: block; }
   .grid-table tr.row-new:has(td.cell-editing) td[data-f="name"] { flex: 0 0 100%; }
 
