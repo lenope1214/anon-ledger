@@ -211,6 +211,8 @@ form label input, form label select { margin-top: 0.2rem; font-weight: 400; }
 #txRows tr.row-checked td { background: #fde68a; }
 #txRows tr.row-checked td.kind-cell .kind-tag { background: #fff; }
 #txRows tr.row-pointer { outline: 2px solid var(--accent); outline-offset: -2px; }
+/* 칸을 적는 중에는 그 칸 테두리만 보이면 되니 줄 테두리는 없앤다 */
+#txRows tr.row-pointer:has(td.cell-editing) { outline: none; }
 .sel-summary { color: var(--accent-dark); font-weight: 700; }
 .bundle-btn {
   margin-left: 0.4rem;
@@ -308,7 +310,6 @@ form label input, form label select { margin-top: 0.2rem; font-weight: 400; }
 }
 .cell-input:focus { outline: none; }
 #txRows tr.row-new:hover td { background: #f8fafc; }
-#txRows tr.row-pointer { outline: 2px solid var(--accent); outline-offset: -2px; }
 .cell-company { font-weight: 700; }
 
 /* 빈 줄도 높이를 유지해 엑셀처럼 보이게 (컴장부처럼 촘촘하게) */
