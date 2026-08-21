@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.20.0'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.20.1'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -1279,7 +1279,7 @@ $('#saveBarBtn').addEventListener('click', async () => {
   if (state.easyMode) return saveEasyEntry();
   if (!gridEdit) return;
   const r = gridEdit.r;
-  await commitCell(true);
+  commitCellNow(true);
   startRowEdit(r + 1);
 });
 
@@ -1751,7 +1751,7 @@ async function openCellEditor(r, field) {
   if (!row) return;
   if (gridEdit) {
     if (gridEdit.r === r && gridEdit.field === field) return; // 같은 칸이면 그대로
-    await commitCell(gridEdit.r !== r); // 적던 값을 먼저 반영한다
+    commitCellNow(gridEdit.r !== r); // 적던 값만 바로 반영하고 저장은 뒤에서
   }
 
   const td = $(`#txRows tr[data-r="${r}"] td[data-f="${field}"]`);
@@ -1795,7 +1795,7 @@ async function openCellEditor(r, field) {
   input.addEventListener('keydown', onCellKey);
   input.addEventListener('blur', () => setTimeout(() => {
     if (gridSearching) return; // 검색창으로 옮겨간 것뿐이므로 그대로 둔다
-    if (gridEdit && gridEdit.input === input && document.activeElement !== input) commitCell(true);
+    if (gridEdit && gridEdit.input === input && document.activeElement !== input) commitCellNow(true);
   }, 120));
 }
 
@@ -1936,14 +1936,6 @@ function queueRowSave(r, mayLeave) {
   return gridSaveChain;
 }
 
-// 값을 반영하고 저장이 끝날 때까지 기다린다 (칸을 떠날 때·검색 등)
-async function commitCell(mayLeave) {
-  const r = applyCellValue();
-  if (r == null) return;
-  await queueRowSave(r, mayLeave);
-  updateSaveBar();
-}
-
 // 값만 바로 반영하고 저장은 뒤에서 — 칸 이동이 기다리지 않게 한다
 function commitCellNow(mayLeave) {
   const r = applyCellValue();
@@ -1986,7 +1978,6 @@ async function saveExistingRow(row, r, keepEditing) {
         Object.assign(row, rowFromTx(Object.assign({ companyName: row.companyName }, saved)));
       }
     }
-    toast('고쳤습니다.');
     drawCompanyPanel(true);
     scheduleCompanyRefresh();
     clearProductsCache();
@@ -2028,7 +2019,6 @@ async function saveNewRowIfReady(r) {
     drawCompanyPanel(true);
     syncBlankRow();        // 아직 손대지 않은 빈 줄은 방금 쓴 날짜를 따라간다
     updateSummaryOnly();
-    toast('저장했습니다.');
     return true;
   } catch (e) {
     toast('⚠ 저장하지 못했습니다 — ' + (e.message || '연결을 확인하세요'));
