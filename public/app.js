@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.20.1'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.20.2'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -1521,7 +1521,7 @@ function rowHtml(row, i) {
   ].filter(Boolean).join(' ');
   return `<tr data-r="${i}" data-kind="${row.kind}" data-id="${row.id || ''}" class="${rowCls}">
     <td class="chk">${key ? `<input type="checkbox" ${checked ? 'checked' : ''}>` : ''}</td>
-    <td class="rowno">${isNew ? '' : i + 1}</td>
+    <td class="rowno">${row.no || ''}</td>
     ${cell('date')}
     ${cell('company', 'cell-company')}
     ${cell('name')}
@@ -1582,6 +1582,27 @@ function setCursorRow(i) {
   drawCompanyPanel();
 }
 
+// No 를 다시 매긴다 — 저장된 줄만 1,2,3… (저장 안 된 줄은 번호 없음)
+function renumberRows() {
+  let n = 0;
+  gridRows.forEach((r) => {
+    r.no = r.kind === 'tx' ? ++n : '';
+  });
+}
+
+// 그 줄의 화면 요소
+const rowElAt = (i) => $(`#txRows tr[data-r="${i}"]`);
+
+// 저장된 줄 중 다음/이전 줄 번호 (저장 안 된 줄은 건너뛴다)
+function nextSavedRow(from) {
+  for (let i = (from == null ? -1 : from) + 1; i < gridRows.length; i++) if (gridRows[i].kind === 'tx') return i;
+  return -1;
+}
+function prevSavedRow(from) {
+  for (let i = (from == null ? gridRows.length : from) - 1; i >= 0; i--) if (gridRows[i].kind === 'tx') return i;
+  return -1;
+}
+
 // 적는 줄(맨 아래 빈 줄)이 화면에 보이게 스크롤한다
 function scrollToBlankRow() {
   const i = gridRows.findIndex((r) => r.kind === 'new');
@@ -1614,6 +1635,7 @@ function ensureTrailingBlank() {
   const last = gridRows[gridRows.length - 1];
   if (last && last.kind === 'new') return 0;
   gridRows.push(blankRow());
+  renumberRows();
   const html = rowHtml(gridRows[gridRows.length - 1], gridRows.length - 1);
   const filler = tbody.querySelector('tr.grid-filler');
   if (filler) filler.insertAdjacentHTML('beforebegin', html);
@@ -1652,6 +1674,7 @@ async function drawTxRows() {
     .sort((a, b) => a.sortKey.localeCompare(b.sortKey));
   for (let k = 0; k < BLANK_ROWS; k++) gridRows.push(blankRow());
 
+  renumberRows();
   tbody.innerHTML = gridRows.map((r, i) => rowHtml(r, i)).join('');
   updateSelSummary();
   drawCompanyPanel(true);
@@ -2014,7 +2037,9 @@ async function saveNewRowIfReady(r) {
     if (c) state.entryCompanyId = String(c.id);
     state.entryDate = tx.date;
     gridRows[r] = rowFromTx(Object.assign({ companyName: c ? c.name : row.companyName }, tx));
+    renumberRows(); // 저장돼 새 번호가 생겼으니 다시 매긴다
     paintRow(r);
+    for (let k = r + 1; k < gridRows.length; k++) if (gridRows[k].kind === 'tx') paintRow(k); // 뒤 줄 번호도 갱신
     ensureTrailingBlank(); // 저장된 줄 아래에 새 빈 줄을 하나 만든다
     drawCompanyPanel(true);
     syncBlankRow();        // 아직 손대지 않은 빈 줄은 방금 쓴 날짜를 따라간다
@@ -2108,6 +2133,7 @@ function startRowEdit(r) {
     const tbody = $('#txRows');
     if (!tbody) return;
     gridRows.push(blankRow());
+    renumberRows();
     r = gridRows.length - 1;
     tbody.insertAdjacentHTML('beforeend', rowHtml(gridRows[r], r));
   }
@@ -2218,53 +2244,54 @@ function updatePointerHighlight() {
 
 // Ins 연속 체크: 포인터의 다음 행을 체크 (키를 누르고 있으면 반복)
 function checkNextRow() {
-  if (sheetLastIdx == null) return;
-  const rows = $$('#txRows tr[data-id]:not([data-id=""])');
-  const next = rows[sheetLastIdx + 1];
-  if (!next) {
+  const next = nextSavedRow(sheetLastIdx);
+  if (next < 0) {
     toast('마지막 줄입니다.');
     return;
   }
-  sheetLastIdx += 1;
-  const cb = next.querySelector('input[type="checkbox"]');
-  if (cb && !cb.checked) {
-    cb.checked = true;
-    checkedTxIds.add(rowKey(next));
-    next.classList.add('row-checked');
+  sheetLastIdx = next;
+  const tr = rowElAt(next);
+  if (tr) {
+    const cb = tr.querySelector('input[type="checkbox"]');
+    if (cb && !cb.checked) {
+      cb.checked = true;
+      checkedTxIds.add(rowKey(tr));
+      tr.classList.add('row-checked');
+    }
+    scrollRowIntoView(tr);
   }
-  scrollRowIntoView(next);
   updatePointerHighlight();
   updateSelSummary();
 }
 
 // '-' 건너뛰기: 체크하지 않고 포인터만 다음 행으로
 function skipNextRow() {
-  if (sheetLastIdx == null) return;
-  const rows = $$('#txRows tr[data-id]');
-  const next = rows[sheetLastIdx + 1];
-  if (!next) {
+  const next = nextSavedRow(sheetLastIdx);
+  if (next < 0) {
     toast('마지막 줄입니다.');
     return;
   }
-  sheetLastIdx += 1;
-  scrollRowIntoView(next);
+  sheetLastIdx = next;
+  const tr = rowElAt(next);
+  if (tr) scrollRowIntoView(tr);
   updatePointerHighlight();
 }
 
 // Backspace 되돌리기: 포인터 행의 체크를 풀고 포인터를 한 칸 위로 (연타 가능)
 function undoCheckRow() {
   if (sheetLastIdx == null || sheetLastIdx < 0) return;
-  const rows = $$('#txRows tr[data-id]');
-  const cur = rows[sheetLastIdx];
-  if (!cur) return;
-  const cb = cur.querySelector('input[type="checkbox"]');
-  if (cb && cb.checked) {
-    cb.checked = false;
-    checkedTxIds.delete(rowKey(cur));
-    cur.classList.remove('row-checked');
+  const cur = rowElAt(sheetLastIdx);
+  if (cur) {
+    const cb = cur.querySelector('input[type="checkbox"]');
+    if (cb && cb.checked) {
+      cb.checked = false;
+      checkedTxIds.delete(rowKey(cur));
+      cur.classList.remove('row-checked');
+    }
   }
-  sheetLastIdx -= 1; // -1이 되면 '첫 행 이전' 상태 — 다음 '='는 첫 행부터 체크
-  if (sheetLastIdx >= 0) scrollRowIntoView(rows[sheetLastIdx]);
+  sheetLastIdx = prevSavedRow(sheetLastIdx); // 없으면 -1 (다음 Ins는 첫 줄부터)
+  const back = sheetLastIdx >= 0 ? rowElAt(sheetLastIdx) : null;
+  if (back) scrollRowIntoView(back);
   updatePointerHighlight();
   updateSelSummary();
 }
