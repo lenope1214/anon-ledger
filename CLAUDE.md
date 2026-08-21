@@ -68,7 +68,7 @@ UI 문구, 커밋 메시지, 문서는 모두 한국어를 사용한다.
 
 - **운영** https://ledger.anon-chat.kr — `production` 브랜치
 - **개발** https://dev-ledger.anon-chat.kr — `develop` 브랜치
-- 두 브랜치는 **같은 내용으로 유지**한다 (동시 반영이 기본값). 현재 **v1.20.0**
+- 두 브랜치는 **같은 내용으로 유지**한다 (동시 반영이 기본값). 현재 **v1.20.1**
 - 두 도메인 모두 Cloudflare 프록시(주황 구름) 상태 — SSL 자동 갱신 실패 위험이 있어
   DNS 전용(회색 구름)을 권했으나 사용자 미적용. Vercel 운영 브랜치 설정 위치는
   Settings → Environments → Production → Branch Tracking (구 UI의 Git 메뉴 아님)
@@ -109,6 +109,10 @@ UI 문구, 커밋 메시지, 문서는 모두 한국어를 사용한다.
   `paintRow()`는 적는 중인 칸을 건드리지 않고 나머지 칸만 다시 그린다.
   상호 목록 재조회는 600ms 디바운스(`scheduleCompanyRefresh`),
   저장 실패는 알림창 대신 토스트로 알린다
+- **클릭으로 칸을 옮길 때도 기다리지 않는다** (v1.20.1). `openCellEditor`·blur·
+  휴대폰 저장 막대가 모두 `commitCellNow()`를 쓰고 `commitCell()`은 없앴다.
+  잘 저장됐을 때는 알림을 띄우지 않고(‘고쳤습니다/저장했습니다’ 제거)
+  **실패했을 때만** 토스트로 알린다. 클릭 이동 52~85ms
 - Enter/Tab=다음 칸, 줄 끝에서 저장 후 다음 줄로, ↑↓←→로 칸 이동.
   **←/→는 글자 사이를 먼저 움직이고 끝에 닿았을 때만 칸을 옮긴다** (v1.16.1).
   숫자 칸도 `type=text` + `inputmode`로 만들어 커서 위치를 쓸 수 있게 했다
