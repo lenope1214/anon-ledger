@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.19.7'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.20.0'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -837,6 +837,7 @@ async function renderTransactions() {
         <button id="btnAddTx" title="한 거래에 품목을 여러 개 적습니다">＋품목</button>
         <button id="btnEasyOn" title="글씨를 크게 해서 하나씩 입력합니다">🔎큰글씨</button>
         <button type="button" id="btnPin" class="pin-btn" title="저장 후 커서가 돌아갈 칸 고정 (F2)">📌<span id="pinLabel" class="pin-label">고정</span></button>
+        <button type="button" id="btnDelSel" class="danger del-sel" disabled title="선택한 줄을 모두 지웁니다 (Delete 키)">🗑삭제</button>
         <button type="button" id="btnTxCsv" title="지금 조건 그대로 엑셀로 내려받기">📄엑셀</button>
         <button type="button" id="btnFullscreen" title="전체화면으로 크게 보기 (F11과 같음)">⛶전체</button>
         <span class="summary tx-summary"><span id="txSummary"></span><span id="selSummary" class="sel-summary"></span></span>
@@ -854,7 +855,7 @@ async function renderTransactions() {
         <span><b>↑↓←→</b> 칸 이동</span>
         <span><b>Tab</b> 검색</span>
         <span><b>=</b> 참조 반전</span>
-        <span><b>Ins</b> 연속 선택</span>
+        <span><b>Ins</b> 연속 선택 · <b>Del</b> 선택 삭제</span>
         <span><b>F2</b> 커서 고정</span>
         <button type="button" id="btnHelpInline" class="link-btn">사용법</button>
       </p>
@@ -921,6 +922,7 @@ async function renderTransactions() {
     } catch (err) { /* 무시 */ }
   });
   $('#btnAddTx').addEventListener('click', () => openTxForm(null));
+  $('#btnDelSel').addEventListener('click', deleteSelectedRows);
   $('#btnTxCsv').addEventListener('click', exportTransactionsCsv);
   $('#btnFullscreen').addEventListener('click', toggleFullscreen);
   $('#btnEasyOn').addEventListener('click', () => setEasyMode(true));
@@ -2168,8 +2170,13 @@ function onCellKey(e) {
 // 체크된 거래의 소계 표시
 function updateSelSummary() {
   const el = $('#selSummary');
-  if (!el) return;
   const sel = txCache.filter((t) => checkedTxIds.has('t' + t.id));
+  const delBtn = $('#btnDelSel');
+  if (delBtn) {
+    delBtn.disabled = !sel.length;
+    delBtn.textContent = sel.length ? `🗑삭제 ${sel.length}` : '🗑삭제';
+  }
+  if (!el) return;
   if (!sel.length) {
     el.innerHTML = '';
     return;
@@ -2182,9 +2189,12 @@ function updateSelSummary() {
     (saleSum || !buySum ? ` 매출 ${won(saleSum)}원` : '') +
     (buySum ? ` 매입 ${won(buySum)}원` : '') +
     (saleSum && buySum ? ` · 이익 ${won(saleSum - buySum)}원` : '') +
-    (canBundle ? ' <button type="button" id="btnBundleSheet" class="bundle-btn">🧾 선택한 것 한 장으로</button>' : '');
+    (canBundle ? ' <button type="button" id="btnBundleSheet" class="bundle-btn">🧾 선택한 것 한 장으로</button>' : '') +
+    ' <button type="button" id="btnDelSelInline" class="bundle-btn del-sel">🗑 선택한 것 지우기</button>';
   const btn = $('#btnBundleSheet');
   if (btn) btn.addEventListener('click', openBundleStatement);
+  const del = $('#btnDelSelInline');
+  if (del) del.addEventListener('click', deleteSelectedRows);
 }
 
 // 고정된 머리글·입력 행에 가려지지 않게 스크롤한다 (다음 줄까지 한 줄 더 보이도록)
@@ -2271,7 +2281,7 @@ function undoCheckRow() {
 
 document.addEventListener('keydown', (e) => {
   if (state.tab !== 'transactions' || gridEdit) return;
-  if (!['Insert', '-', 'Backspace', '='].includes(e.key)) return;
+  if (!['Insert', '-', 'Backspace', '=', 'Delete'].includes(e.key)) return;
   // 입력 중일 땐 원래 동작 유지 — 다만 방금 누른 체크 네모는 예외
   // (줄을 클릭해 체크하면 그 네모가 포커스를 갖는데, 이때도 '='로 이어서 체크되어야 한다)
   if (e.target.closest('select, textarea')) return;
@@ -2279,7 +2289,8 @@ document.addEventListener('keydown', (e) => {
   if (inp && !(inp.type === 'checkbox' && inp.closest('#txRows'))) return;
   if (!$('#modal').classList.contains('hidden')) return;
   e.preventDefault();
-  if (e.key === '=') flipRowKind(gridCursor.r, false); // 지금 줄의 참조를 뒤집는다
+  if (e.key === 'Delete') deleteSelectedRows();         // 고른 줄을 한꺼번에 지운다
+  else if (e.key === '=') flipRowKind(gridCursor.r, false); // 지금 줄의 참조를 뒤집는다
   else if (e.key === 'Insert') checkNextRow();
   else if (e.key === '-') skipNextRow();
   else undoCheckRow();
@@ -2928,6 +2939,29 @@ function partyTableEditable(c) {
       ${f('phone', '연락처', 'inputmode="tel"')}
       ${f('address', '주소')}
     </table>`;
+}
+
+// 체크한 줄을 한꺼번에 지운다 (컴장부 상단 [삭제]와 같은 기능)
+async function deleteSelectedRows() {
+  const sel = txCache.filter((t) => checkedTxIds.has('t' + t.id));
+  if (!sel.length) return toast('먼저 줄 왼쪽 네모를 눌러(또는 Ins 키로) 지울 줄을 고르세요.');
+  const first = sel[0];
+  const more = sel.length > 1 ? ` 외 ${sel.length - 1}건` : '';
+  if (!confirm(`선택한 ${sel.length}건을 지울까요?\n\n${first.date} ${first.companyName}${more}\n\n지운 내역은 되돌릴 수 없습니다.`)) return;
+  let done = 0;
+  for (const t of sel) {
+    try {
+      await api('DELETE', '/api/transactions/' + t.id);
+      checkedTxIds.delete('t' + t.id);
+      done += 1;
+    } catch (e) {
+      toast('⚠ 일부를 지우지 못했습니다 — ' + e.message);
+      break;
+    }
+  }
+  toast(`${done}건을 지웠습니다.`);
+  await refreshCompanies();
+  await drawTxRows();
 }
 
 // 체크한 여러 거래를 한 장의 거래명세표로 묶는다 (같은 상호끼리만)

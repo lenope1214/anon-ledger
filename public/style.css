@@ -224,6 +224,9 @@ form label input, form label select { margin-top: 0.2rem; font-weight: 400; }
   background: #eff6ff;
 }
 .bundle-btn:hover { background: #dbeafe; }
+.del-sel { color: var(--danger); border-color: #fecaca; background: #fef2f2; }
+.del-sel:hover:not(:disabled) { background: #fee2e2; }
+.del-sel:disabled { color: #cbd5e1; border-color: var(--line); background: var(--card); cursor: default; }
 
 /* 검색(필터) 입력 */
 .section-head .date-filter { flex: 0 1 auto; width: auto; }
