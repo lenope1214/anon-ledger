@@ -322,6 +322,11 @@ form label input, form label select { margin-top: 0.2rem; font-weight: 400; }
 .grid-filler td { height: 1.75rem; }
 /* 아래 빈 곳을 누르면 적을 줄이 한 줄 더 생긴다 */
 .grid-filler { cursor: cell; }
+/* 이미 있는 빈 줄로 커서가 갈 때 한 번 반짝여 알려준다 */
+@keyframes rowFlash { from { background: #dbeafe; } to { background: transparent; } }
+#txRows tr.row-flash td { animation: rowFlash 0.7s ease-out; }
+.ledger-wrap { cursor: cell; }
+.ledger-wrap table { cursor: auto; }
 .grid-filler:hover td { background: #f4f8ff; }
 .grid-filler td:empty::after { content: ''; display: inline-block; }
 .rowno { width: 2.6rem; text-align: right; color: var(--sub); font-size: 0.78rem; }

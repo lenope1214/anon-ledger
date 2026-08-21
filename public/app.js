@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.20.3'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.20.4'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -922,6 +922,12 @@ async function renderTransactions() {
     } catch (err) { /* 무시 */ }
   });
   $('#btnAddTx').addEventListener('click', () => openTxForm(null));
+  // 장부 아래 빈 공간(격자 줄이 없는 자투리까지)을 눌러도 적을 줄이 생긴다
+  $('.ledger-wrap').addEventListener('click', (e) => {
+    if (e.target.closest('tr')) return; // 줄(격자 줄 포함)은 그 줄 처리에 맡긴다
+    if (e.target.closest('thead')) return;
+    addRowFromEmptySpace();
+  });
   $('#btnDelSel').addEventListener('click', deleteSelectedRows);
   $('#btnTxCsv').addEventListener('click', exportTransactionsCsv);
   $('#btnFullscreen').addEventListener('click', toggleFullscreen);
@@ -1583,10 +1589,24 @@ function setCursorRow(i) {
 }
 
 // 아무것도 안 적힌 빈 줄인지
-const isUntouchedBlank = (row) =>
-  row && row.kind === 'new' && !String(row.companyName || '').trim() && !String(row.name || '').trim() &&
-  !String(row.spec || '').trim() && row.qty === '' && row.price === '' &&
-  (row.supply === '' || row.supply == null) && !String(row.memo || '').trim();
+// 빈 줄에 자동으로 채워지는 거래처 이름 (직전에 쓴 거래처)
+function prefillCompanyName() {
+  const c = state.companies.find((x) => String(x.id) === String(state.entryCompanyId));
+  return c ? c.name : '';
+}
+
+// 아직 아무것도 적지 않은 빈 줄인지.
+//  · 거래처는 자동으로 채워지므로 그 값 그대로면 '안 적은 것'으로 본다
+//  · 금액은 0으로 다시 계산돼 들어오기도 하므로 숫자로 비어 있는지 본다
+const isUntouchedBlank = (row) => {
+  if (!row || row.kind !== 'new') return false;
+  const co = String(row.companyName || '').trim();
+  if (co && co !== prefillCompanyName()) return false;
+  return (
+    !String(row.name || '').trim() && !String(row.spec || '').trim() &&
+    !Number(row.qty) && !Number(row.price) && !Number(row.supply) && !String(row.memo || '').trim()
+  );
+};
 
 // 장부 아래 빈 곳을 누르면 적을 줄을 한 줄 더 만든다 (엑셀에서 아래를 누르는 느낌)
 function addRowFromEmptySpace() {
@@ -1594,7 +1614,18 @@ function addRowFromEmptySpace() {
   if (!tbody) return;
   if (gridEdit) commitCellNow(false); // 적던 값을 먼저 반영하고 판단한다
   const last = gridRows[gridRows.length - 1];
-  if (isUntouchedBlank(last)) return startRowEdit(gridRows.length - 1); // 이미 비어 있으면 그 줄로
+  if (isUntouchedBlank(last)) {
+    // 이미 비어 있는 줄이 있으면 새로 만들지 않고 그 줄로 간다 (한 번 반짝여 알려준다)
+    const i = gridRows.length - 1;
+    startRowEdit(i);
+    const tr = rowElAt(i);
+    if (tr) {
+      tr.classList.remove('row-flash');
+      void tr.offsetWidth;
+      tr.classList.add('row-flash');
+    }
+    return;
+  }
   gridRows.push(blankRow());
   renumberRows();
   const i = gridRows.length - 1;
