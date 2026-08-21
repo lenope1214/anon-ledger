@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.19.2'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.19.3'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -1444,7 +1444,7 @@ function applyEntryCompany(c) {
 }
 
 /* ─────────────── 엑셀식 셀 입력 그리드 ─────────────── */
-const GRID_COLS = ['date', 'company', 'name', 'spec', 'qty', 'price', 'memo'];
+const GRID_COLS = ['date', 'company', 'name', 'spec', 'qty', 'price', 'supply', 'memo'];
 const BLANK_ROWS = 1;               // 맨 아래에 두는 빈 줄 (항상 한 줄만)
 
 let gridRows = [];                  // 화면에 보이는 줄 (거래·빈 줄)
@@ -1488,7 +1488,7 @@ function cellText(row, field) {
   return v === '' || v == null ? '' : won(v);
 }
 
-const CELL_PH = { date: '날짜', company: '상호', name: '품명', spec: '규격', qty: '수량', price: '단가', memo: '비고' };
+const CELL_PH = { date: '날짜', company: '상호', name: '품명', spec: '규격', qty: '수량', price: '단가', supply: '금액', memo: '비고' };
 
 function rowHtml(row, i) {
   const isNew = row.kind === 'new';
@@ -1503,9 +1503,13 @@ function rowHtml(row, i) {
   const checked = key && checkedTxIds.has(key);
   const num = (v, extra, f) => `<td class="num ${extra || ''}" data-f="${f}">${v === '' || v == null ? '' : won(v)}</td>`;
   const blankNum = isNew && !row.price && !money;
-  const supplyCell = money
-    ? cell('supply', 'num')                    // 입금·출금은 공급가액을 직접 적는다
-    : num(blankNum ? '' : calc.supply, calc.supply < 0 ? 'neg' : '', 'supply');
+  // 공급가액은 늘 눌러서 적을 수 있다 (품목 없이 금액만 적으면 입금·출금이 된다)
+  const supplyShown = money
+    ? row.supply === '' || row.supply == null ? '' : row.supply
+    : blankNum ? '' : calc.supply;
+  const supplyCell = `<td class="num ${Number(supplyShown) < 0 ? 'neg' : ''}" data-edit="1" data-f="supply" data-ph="공급가액">${
+    supplyShown === '' || supplyShown == null ? '' : won(supplyShown)
+  }</td>`;
   const rowCls = [
     IN_KINDS.includes(kind) ? 'row-buy' : '',
     money ? 'row-money' : '',
@@ -1741,7 +1745,12 @@ async function openCellEditor(r, field) {
     input.autocomplete = 'off';
     input.classList.add('num');
   }
-  const raw = field === 'company' ? row.companyName : row[field];
+  let raw = field === 'company' ? row.companyName : row[field];
+  // 공급가액은 자동 계산된 값이 보이던 자리라, 그 값을 그대로 놓고 고치게 한다
+  if (field === 'supply' && (raw === '' || raw == null) && !isMoneyOnly(row.txKind)) {
+    const c = newRowCalc(row);
+    raw = row.price === '' || row.price == null ? '' : c.supply;
+  }
   input.value = field === 'date' && !raw && row.kind === 'new' ? state.entryDate || today() : raw == null ? '' : raw;
   if (field === 'company' && row.kind === 'new' && !raw) {
     const c = state.companies.find((x) => String(x.id) === String(state.entryCompanyId));
@@ -1790,27 +1799,71 @@ function applyCellValue() {
     const found = state.companies.find((c) => c.name.toLowerCase() === value.toLowerCase());
     row.companyId = found ? found.id : 0;
     if (found) state.entryCompanyId = String(found.id);
-  } else if (['qty', 'price', 'paid', 'supply'].includes(field)) {
+  } else if (field === 'supply') {
+    applySupplyValue(row, value);
+  } else if (['qty', 'price', 'paid'].includes(field)) {
     row[field] = value === '' ? '' : cellNum(value);
-    if (field === 'supply' && isMoneyOnly(row.txKind) && row.supply !== '') {
-      const size = Math.abs(Number(row.supply) || 0);
-      row.supply = kindOf(row.txKind) === 'deposit' ? size : -size;
-      row.total = row.supply;
-    }
   } else {
     row[field] = value;
   }
   if (row.kind === 'new' && field === 'date') state.entryDate = value;
-  // 저장된 줄은 서버 응답을 기다리지 않고 화면 숫자를 먼저 다시 계산한다
-  if (row.kind === 'tx' && !row.multi) {
-    const c = calcItem(Number(row.qty) || 0, Number(row.price) || 0, (row.tx && row.tx.vatMode) || 'separate');
-    row.supply = c.supply;
-    row.tax = c.tax;
-    row.total = c.supply + c.tax;
-  }
+  // 화면 숫자는 서버 응답을 기다리지 않고 그 자리에서 다시 계산한다
+  if (!isMoneyOnly(row.txKind) && !row.multi && field !== 'supply') recalcRowAmounts(row);
   paintRow(r);
   updateSummaryOnly();
   return r;
+}
+
+const rowVatMode = (row) => (row.kind === 'tx' && row.tx && row.tx.vatMode) || state.entryVat;
+
+// 수량·단가로 공급가액·부가세·합계를 다시 계산한다
+function recalcRowAmounts(row) {
+  const c = calcItem(Number(row.qty) || 0, Number(row.price) || 0, rowVatMode(row));
+  row.supply = c.supply;
+  row.tax = c.tax;
+  row.total = c.supply + c.tax;
+}
+
+// 공급가액 칸에 직접 적었을 때 (컴장부와 같은 방식)
+//  · 품목·수량·단가가 비어 있으면 → 금액만 있는 줄, 즉 입금(+)·출금(−)
+//  · 품목이 있으면 → 적은 금액에 맞춰 단가를 거꾸로 계산한다
+function applySupplyValue(row, value) {
+  const v = value === '' ? '' : cellNum(value);
+  const moneyRow =
+    isMoneyOnly(row.txKind) ||
+    (!String(row.name || '').trim() && (row.qty === '' || row.qty == null) && (row.price === '' || row.price == null));
+
+  if (moneyRow) {
+    if (!isMoneyOnly(row.txKind)) row.txKind = Number(v) < 0 ? 'withdraw' : 'deposit'; // 참조를 입금·출금으로
+    if (v === '') {
+      row.supply = '';
+      row.total = '';
+    } else {
+      const size = Math.abs(Number(v) || 0);
+      row.supply = kindOf(row.txKind) === 'deposit' ? size : -size; // 입금 +, 출금 −
+      row.total = row.supply;
+    }
+    row.tax = 0;
+    row.name = '';
+    row.spec = '';
+    row.qty = '';
+    row.price = '';
+    return;
+  }
+
+  if (v === '') { // 금액을 지우면 단가도 비운다
+    row.price = '';
+    recalcRowAmounts(row);
+    return;
+  }
+  // 방향(+/−)은 참조가 정하고, 적은 금액은 크기만 쓴다 — 단가가 음수가 되지 않게
+  const goesOut = OUT_KINDS.includes(kindOf(row.txKind));
+  const size = Math.abs(Number(row.qty) || 1);
+  const qty = goesOut ? -size : size;
+  row.qty = qty;
+  const base = rowVatMode(row) === 'included' ? Math.round(Math.abs(v) * 1.1) : Math.abs(v);
+  row.price = Math.round(base / size);
+  recalcRowAmounts(row);
 }
 
 // 상호 목록(거래 합계 포함) 다시 읽기 — 연달아 저장할 땐 한 번만
@@ -1981,7 +2034,7 @@ function updateSummaryOnly() {
 /* ── 셀 사이 이동 ── */
 function editableFields(row) {
   if (!row) return GRID_COLS;
-  if (isMoneyOnly(row.txKind)) return ['date', 'company', 'supply', 'memo']; // 입금·출금은 금액만
+  if (isMoneyOnly(row.txKind)) return ['date', 'company', 'supply', 'memo']; // 입금·출금은 금액 한 칸만
   if (row.kind === 'tx' && row.multi) return ['date', 'company', 'memo'];    // 품목은 팝업에서 고친다
   return GRID_COLS;
 }
