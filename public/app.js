@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.19.1'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.19.2'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -828,19 +828,20 @@ async function renderTransactions() {
           <option value="" ${state.txKindFilter === '' ? 'selected' : ''}>참조 전체 보기</option>
           ${KIND_LIST.map((k) => `<option value="${k}" ${state.txKindFilter === k ? 'selected' : ''}>${KINDS[k].label}만 보기</option>`).join('')}
         </select>
-        <select id="entryKind" class="vat-select" title="새로 적는 줄의 참조">
-          ${KIND_LIST.map((k) => `<option value="${k}" ${k === state.entryKind ? 'selected' : ''}>${KINDS[k].label} — ${KINDS[k].help}</option>`).join('')}
+        <select id="entryKind" class="vat-select" title="새로 적는 줄의 참조 (= 키로 반전)">
+          ${KIND_LIST.map((k) => `<option value="${k}" ${k === state.entryKind ? 'selected' : ''} title="${esc(KINDS[k].help)}">${KINDS[k].label}</option>`).join('')}
         </select>
         <select id="entryVat" class="vat-select" title="새로 적는 줄의 부가세 방식">
           ${Object.entries(VAT_LABEL).map(([v, l]) => `<option value="${v}" ${v === state.entryVat ? 'selected' : ''}>${l}</option>`).join('')}
         </select>
-        <button id="btnAddTx">＋ 여러 품목 거래</button>
-        <button id="btnEasyOn" title="글씨를 크게 해서 하나씩 입력합니다">🔎 큰 글씨</button>
-        <button type="button" id="btnPin" class="pin-btn">📌<span id="pinLabel" class="pin-label">커서 고정</span></button>
-        <button type="button" id="btnTxCsv">📄 엑셀</button>
-        <button type="button" id="btnFullscreen" title="전체화면으로 크게 보기 (F11과 같음)">⛶ 전체화면</button>
+        <button id="btnAddTx" title="한 거래에 품목을 여러 개 적습니다">＋품목</button>
+        <button id="btnEasyOn" title="글씨를 크게 해서 하나씩 입력합니다">🔎큰글씨</button>
+        <button type="button" id="btnPin" class="pin-btn" title="저장 후 커서가 돌아갈 칸 고정 (F2)">📌<span id="pinLabel" class="pin-label">고정</span></button>
+        <button type="button" id="btnTxCsv" title="지금 조건 그대로 엑셀로 내려받기">📄엑셀</button>
+        <button type="button" id="btnFullscreen" title="전체화면으로 크게 보기 (F11과 같음)">⛶전체</button>
+        <span class="summary tx-summary"><span id="txSummary"></span><span id="selSummary" class="sel-summary"></span></span>
       </div>
-      <p class="summary"><span id="txSummary"></span><span id="selSummary" class="sel-summary"></span></p>
+
       <div class="table-wrap ledger-wrap">
         <table class="ledger-table grid-table">
           <thead><tr><th class="chk"></th><th class="rowno">No</th><th>날짜</th><th>거래처</th><th>품목</th><th>규격</th><th class="num">수량</th><th class="num">단가</th><th class="num">공급가액</th><th>참조</th><th class="num">부가세</th><th class="num">합계</th><th>비고</th><th class="actions"></th></tr></thead>
@@ -849,13 +850,13 @@ async function renderTransactions() {
       </div>
       <div id="coPanel" class="co-panel"></div>
       <p class="hint sheet-hint">
-        <span>빈 칸을 <b>눌러서</b> 적으세요 · 이미 적은 칸도 눌러 고칠 수 있습니다</span>
-        <span><b>Enter</b> 다음 칸 · 줄 끝에서 저장</span>
-        <span><b>↑↓ ← →</b> 칸 이동</span>
-        <span><b>Tab</b> 거래처·품목 검색</span>
-        <span><b>=</b> 참조 반전 · <b>Ins</b> 연속 선택</span>
+        <span><b>Enter</b> 다음 칸 · 줄 끝 저장</span>
+        <span><b>↑↓←→</b> 칸 이동</span>
+        <span><b>Tab</b> 검색</span>
+        <span><b>=</b> 참조 반전</span>
+        <span><b>Ins</b> 연속 선택</span>
         <span><b>F2</b> 커서 고정</span>
-        <button type="button" id="btnHelpInline" class="link-btn">자세한 사용법 보기</button>
+        <button type="button" id="btnHelpInline" class="link-btn">사용법</button>
       </p>
       <button type="button" class="fab" id="btnQuickSearch" title="빠른 검색 (Tab)">🔍 검색</button>
       <button type="button" class="fab fab-help" id="btnHelp" title="사용법 안내">?</button>
@@ -944,7 +945,11 @@ function fitLedgerHeight() {
   const top = rect.top + window.scrollY;
   // 장부 아래에 있는 것(안내 문구·카드 여백·버전 표시)만큼을 남긴다
   const below = Math.max(0, document.body.scrollHeight - (rect.bottom + window.scrollY));
-  wrap.style.maxHeight = Math.max(240, Math.round(window.innerHeight - top - below)) + 'px';
+  // 줄이 적어도 장부가 화면 끝까지 차지하도록 높이를 고정한다 (아래 빈 공백 없애기)
+  const h = Math.max(200, Math.round(window.innerHeight - top - below));
+  wrap.style.height = h + 'px';
+  wrap.style.maxHeight = h + 'px';
+  fillGridSpace();
 }
 
 window.addEventListener('resize', () => {
@@ -1556,6 +1561,24 @@ function paintRow(i) {
 
 const blankCount = () => gridRows.reduce((s, r) => s + (r.kind === 'new' ? 1 : 0), 0);
 
+// 남는 아래 공간을 빈 격자로 채운다 (컴장부처럼 표가 화면 끝까지 이어지게)
+function fillGridSpace() {
+  const tbody = $('#txRows');
+  const wrap = $('.ledger-wrap');
+  if (!tbody || !wrap) return;
+  tbody.querySelectorAll('tr.grid-filler').forEach((tr) => tr.remove());
+  if (window.matchMedia('(max-width: 700px)').matches) return; // 휴대폰 카드형은 그대로
+  const head = $('.grid-table thead');
+  const cols = $$('.grid-table thead th').length || 14;
+  const last = tbody.querySelector('tr:last-child');
+  const rowH = last ? last.getBoundingClientRect().height : 28;
+  const free = wrap.clientHeight - (head ? head.getBoundingClientRect().height : 0) - tbody.getBoundingClientRect().height;
+  const n = rowH > 0 ? Math.floor(free / rowH) : 0;
+  if (n <= 0) return;
+  const cells = '<td></td>'.repeat(cols);
+  tbody.insertAdjacentHTML('beforeend', `<tr class="grid-filler">${cells}</tr>`.repeat(Math.min(n, 60)));
+}
+
 // 맨 아래 빈 줄은 항상 한 줄만 둔다 (줄을 저장하면 새 빈 줄이 하나 생긴다)
 function ensureTrailingBlank() {
   const tbody = $('#txRows');
@@ -1563,7 +1586,11 @@ function ensureTrailingBlank() {
   const last = gridRows[gridRows.length - 1];
   if (last && last.kind === 'new') return 0;
   gridRows.push(blankRow());
-  tbody.insertAdjacentHTML('beforeend', rowHtml(gridRows[gridRows.length - 1], gridRows.length - 1));
+  const html = rowHtml(gridRows[gridRows.length - 1], gridRows.length - 1);
+  const filler = tbody.querySelector('tr.grid-filler');
+  if (filler) filler.insertAdjacentHTML('beforebegin', html);
+  else tbody.insertAdjacentHTML('beforeend', html);
+  fillGridSpace();
   return 1;
 }
 
@@ -1601,6 +1628,7 @@ async function drawTxRows() {
   updateSelSummary();
   drawCompanyPanel(true);
   bindGridEvents(tbody);
+  fillGridSpace();
   // 새로 적을 수 있는 첫 빈 줄이 보이도록
   const firstBlank = gridRows.findIndex((r) => r.kind === 'new');
   const tr = $(`#txRows tr[data-r="${firstBlank}"]`);
