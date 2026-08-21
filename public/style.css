@@ -862,6 +862,31 @@ body.easy .fab, body.easy .fab-help { display: none; }
 
 /* 좁은 화면에서는 표를 가로로 밀지 않고, 한 거래를 두세 줄 카드처럼 접어서 보여준다 */
 @media (max-width: 700px) {
+  /* 상단은 두 줄로 (한 줄에 몰면 탭이 잘리고 버튼이 쪼개진다) */
+  #topbar { flex-wrap: wrap; padding: 0.2rem 0.5rem; gap: 0.3rem; }
+  #topbar h1 { font-size: 0.9rem; }
+  #topbar .ver-footer { display: none; }
+  #tabs { order: 3; flex: 1 0 100%; }
+  #whoami { font-size: 0.78rem; }
+  #btnLogout { font-size: 0.75rem; padding: 0.25rem 0.5rem; }
+
+  /* 적는 줄(빈 줄)은 장부 아래에 붙여 늘 보이게 한다 */
+  .grid-table tr.row-new {
+    position: sticky;
+    bottom: 0;
+    z-index: 3;
+    background: #eef6ff;
+    box-shadow: 0 -2px 6px rgba(15, 23, 42, 0.12);
+  }
+  .grid-table tr.row-new td[data-f="supply"] { display: block; }
+
+  /* 거래처 정보는 한 줄만 보이고, 누르면 펼쳐진다 */
+  .co-panel .co-item { display: none; }
+  .co-panel.open .co-item { display: flex; flex: 1 1 100%; }
+  .co-panel.open .co-item input { flex: 1; width: auto; }
+  .co-panel::after { content: '▾'; color: var(--sub); margin-left: 0.3rem; }
+  .co-panel.open::after { content: '▴'; }
+
   /* 탭이 잘리지 않도록 좁은 화면에서는 조금 작게 */
   #tabs button { padding: 0.5rem 0.5rem; font-size: 0.94rem; }
 
@@ -924,6 +949,9 @@ body.easy .fab, body.easy .fab-help { display: none; }
   .grid-table td[data-f="name"] { flex: 0 0 100%; font-weight: 600; }
   .grid-table td[data-f="qty"]::before { content: '수량 '; font-size: 0.75rem; color: var(--sub); }
   .grid-table td[data-f="price"]::before { content: '단가 '; font-size: 0.75rem; color: var(--sub); }
+  .grid-table tr.row-new td[data-f="supply"]::before { content: '금액 '; font-size: 0.75rem; color: var(--sub); }
+  .grid-table tr.row-money td[data-f="supply"] { display: block; }
+  .grid-table tr.row-money td[data-f="supply"]::before { content: '금액 '; font-size: 0.75rem; color: var(--sub); }
   .grid-table td[data-f="spec"]:not(:empty)::before { content: '규격 '; font-size: 0.75rem; color: var(--sub); }
   .grid-table tr:not(.row-new) td[data-f="spec"]:empty { display: none; }
 
@@ -945,7 +973,9 @@ body.easy .fab, body.easy .fab-help { display: none; }
   .grid-table td[data-f="spec"] { order: 6; }
   .grid-table td[data-f="qty"] { order: 7; }
   .grid-table td[data-f="price"] { order: 8; }
-  .grid-table td[data-f="total"] { order: 9; }
+  .grid-table td[data-f="supply"] { order: 9; }
+  .grid-table td[data-f="total"] { order: 10; }
+  .grid-table td[data-f="memo"] { order: 11; }
   .grid-table td.actions button { padding: 0.3rem 0.5rem; font-size: 0.8rem; margin: 0; }
   .grid-table td.actions button[data-act="sheet"] { font-size: 0; padding: 0.3rem 0.55rem; }
   .grid-table td.actions button[data-act="sheet"]::after { content: '📄'; font-size: 1rem; }
