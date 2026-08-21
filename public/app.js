@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.20.4'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.20.5'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -2231,11 +2231,6 @@ function onCellKey(e) {
     // 글자 칸에서는 '=' 를 그대로 적을 수 있게 둔다
     e.preventDefault();
     flipRowKind(gridEdit.r, true);
-  } else if (e.key === 'Escape' && (field === 'company' || field === 'name')) {
-    // ESC로도 바로 검색 (Tab이 기본) — 한글을 조합하는 중이어도 적은 글자를 그대로 가져간다
-    e.preventDefault();
-    e.stopPropagation();
-    openContextSearch();
   }
 }
 
@@ -2369,7 +2364,7 @@ document.addEventListener('keydown', (e) => {
   else undoCheckRow();
 });
 
-/* ─────────────── 빠른 검색 시트 (Tab / ESC / 🔍) ─────────────── */
+/* ─────────────── 빠른 검색 시트 (Tab / 🔍) ─────────────── */
 const ss = { tab: 'company', items: [], sel: 0, matched: true, companyId: 0, companyName: '' };
 
 async function getAllProducts() {
@@ -2830,17 +2825,19 @@ $('#ssInput').addEventListener('keydown', (e) => {
   }
 });
 
-// ESC: 거래관리 어디서든 검색 시트 열기/닫기 (칸 안에서는 Tab이 기본)
+// ESC: 열려 있는 것을 닫기만 한다 (검색은 Tab으로만 연다)
 document.addEventListener('keydown', (e) => {
   if (e.key !== 'Escape' || state.tab !== 'transactions') return;
   if (!$('#modal').classList.contains('hidden')) return;
   if (document.body.classList.contains('printing')) return;
-  e.preventDefault();
-  if (searchSheetOpen()) return closeSearchSheet();
-  if (gridEdit && gridEdit.field !== 'company' && gridEdit.field !== 'name') {
+  if (searchSheetOpen()) {
+    e.preventDefault();
+    return closeSearchSheet();
+  }
+  if (gridEdit) {
+    e.preventDefault();
     return closeCellEditor(); // 적던 값을 버리고 편집만 닫는다
   }
-  openContextSearch();
 });
 
 /* ── 거래 입력/수정 폼 ── */
