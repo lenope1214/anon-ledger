@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.19.3'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.19.4'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -933,7 +933,8 @@ async function renderTransactions() {
   updatePinUI();
   await drawTxRows();
   fitLedgerHeight();
-  maybeAutoTour(); // 처음 온 사용자에게 사용법 안내
+  scrollToBlankRow(); // 높이를 맞춘 뒤 적는 줄이 보이게
+  maybeAutoTour();    // 처음 온 사용자에게 사용법 안내
 }
 
 // 장부가 화면 아래까지 꽉 차게 만든다 (컴장부처럼 한 화면을 다 쓰고,
@@ -1565,6 +1566,13 @@ function paintRow(i) {
 
 const blankCount = () => gridRows.reduce((s, r) => s + (r.kind === 'new' ? 1 : 0), 0);
 
+// 적는 줄(맨 아래 빈 줄)이 화면에 보이게 스크롤한다
+function scrollToBlankRow() {
+  const i = gridRows.findIndex((r) => r.kind === 'new');
+  const tr = i >= 0 ? $(`#txRows tr[data-r="${i}"]`) : null;
+  if (tr) tr.scrollIntoView({ block: 'nearest' });
+}
+
 // 남는 아래 공간을 빈 격자로 채운다 (컴장부처럼 표가 화면 끝까지 이어지게)
 function fillGridSpace() {
   const tbody = $('#txRows');
@@ -1634,9 +1642,7 @@ async function drawTxRows() {
   bindGridEvents(tbody);
   fillGridSpace();
   // 새로 적을 수 있는 첫 빈 줄이 보이도록
-  const firstBlank = gridRows.findIndex((r) => r.kind === 'new');
-  const tr = $(`#txRows tr[data-r="${firstBlank}"]`);
-  if (tr) tr.scrollIntoView({ block: 'nearest' });
+  scrollToBlankRow();
 }
 
 function bindGridEvents(tbody) {
@@ -2445,6 +2451,10 @@ function drawCompanyPanel(force) {
     `<label class="co-item co-memo"><span>메모</span>
       <input data-co="memo" data-id="${c.id}" value="${esc(c.memo)}" placeholder=""></label>` +
     `<span class="co-sum">매출 ${won(c.total)}원${c.buyTotal ? ` · 매입 ${won(c.buyTotal)}원` : ''}</span>`;
+  box.onclick = (e) => {
+    if (e.target.tagName === 'INPUT') return; // 칸을 누른 건 수정
+    box.classList.toggle('open');
+  };
   $$('#coPanel input').forEach((inp) => {
     inp.addEventListener('change', () => saveCompanyPanelField(inp));
     inp.addEventListener('keydown', (e) => {
