@@ -319,7 +319,10 @@ form label input, form label select { margin-top: 0.2rem; font-weight: 400; }
 .grid-table tbody td { height: 1.75rem; }
 
 /* 매출·매입 구분 */
-.grid-filler td { height: 1.75rem; pointer-events: none; }
+.grid-filler td { height: 1.75rem; }
+/* 아래 빈 곳을 누르면 적을 줄이 한 줄 더 생긴다 */
+.grid-filler { cursor: cell; }
+.grid-filler:hover td { background: #f4f8ff; }
 .grid-filler td:empty::after { content: ''; display: inline-block; }
 .rowno { width: 2.6rem; text-align: right; color: var(--sub); font-size: 0.78rem; }
 .cell-memo { min-width: 7rem; max-width: 14rem; overflow: hidden; text-overflow: ellipsis; }

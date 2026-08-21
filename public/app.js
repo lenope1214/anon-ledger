@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.20.2'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.20.3'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -1582,6 +1582,30 @@ function setCursorRow(i) {
   drawCompanyPanel();
 }
 
+// 아무것도 안 적힌 빈 줄인지
+const isUntouchedBlank = (row) =>
+  row && row.kind === 'new' && !String(row.companyName || '').trim() && !String(row.name || '').trim() &&
+  !String(row.spec || '').trim() && row.qty === '' && row.price === '' &&
+  (row.supply === '' || row.supply == null) && !String(row.memo || '').trim();
+
+// 장부 아래 빈 곳을 누르면 적을 줄을 한 줄 더 만든다 (엑셀에서 아래를 누르는 느낌)
+function addRowFromEmptySpace() {
+  const tbody = $('#txRows');
+  if (!tbody) return;
+  if (gridEdit) commitCellNow(false); // 적던 값을 먼저 반영하고 판단한다
+  const last = gridRows[gridRows.length - 1];
+  if (isUntouchedBlank(last)) return startRowEdit(gridRows.length - 1); // 이미 비어 있으면 그 줄로
+  gridRows.push(blankRow());
+  renumberRows();
+  const i = gridRows.length - 1;
+  const filler = tbody.querySelector('tr.grid-filler');
+  const html = rowHtml(gridRows[i], i);
+  if (filler) filler.insertAdjacentHTML('beforebegin', html);
+  else tbody.insertAdjacentHTML('beforeend', html);
+  fillGridSpace();
+  startRowEdit(i);
+}
+
 // No 를 다시 매긴다 — 저장된 줄만 1,2,3… (저장 안 된 줄은 번호 없음)
 function renumberRows() {
   let n = 0;
@@ -1688,6 +1712,7 @@ function bindGridEvents(tbody) {
   tbody.onclick = async (e) => {
     const btn = e.target.closest('button[data-act]');
     if (btn) return handleRowAction(btn);
+    if (e.target.closest('tr.grid-filler')) return addRowFromEmptySpace(); // 아래 빈 곳을 누르면 한 줄 더
     const cb = e.target.closest('input[type="checkbox"]');
     const td = e.target.closest('td');
     const tr = e.target.closest('tr[data-r]');
