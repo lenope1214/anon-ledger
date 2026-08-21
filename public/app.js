@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.19.5'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.19.6'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -1562,6 +1562,11 @@ function paintRow(i) {
     return;
   }
   tr.outerHTML = rowHtml(gridRows[i], i);
+  // 다시 그리면 '지금 줄' 표시가 지워지므로 되살린다
+  if (sheetLastIdx === i) {
+    const fresh = $(`#txRows tr[data-r="${i}"]`);
+    if (fresh) fresh.classList.add('row-pointer');
+  }
 }
 
 const blankCount = () => gridRows.reduce((s, r) => s + (r.kind === 'new' ? 1 : 0), 0);
