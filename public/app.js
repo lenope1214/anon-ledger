@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.19.4'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.19.5'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -1566,6 +1566,15 @@ function paintRow(i) {
 
 const blankCount = () => gridRows.reduce((s, r) => s + (r.kind === 'new' ? 1 : 0), 0);
 
+// 지금 줄(커서가 놓인 줄)을 정한다 — 파란 테두리로 표시하고 거래처 정보도 그 줄로 바꾼다
+function setCursorRow(i) {
+  if (!gridRows[i]) return;
+  gridCursor.r = i;
+  sheetLastIdx = i;
+  updatePointerHighlight();
+  drawCompanyPanel();
+}
+
 // 적는 줄(맨 아래 빈 줄)이 화면에 보이게 스크롤한다
 function scrollToBlankRow() {
   const i = gridRows.findIndex((r) => r.kind === 'new');
@@ -1670,6 +1679,7 @@ function bindGridEvents(tbody) {
       updateSelSummary();
       return;
     }
+    setCursorRow(i); // 어디를 누르든 그 줄을 '지금 줄'로 삼는다
     if (td.classList.contains('kind-cell') && td.dataset.f === 'kind') return toggleRowKind(i);
     if (td.dataset.edit) await openCellEditor(i, td.dataset.f);
   };
@@ -2241,7 +2251,7 @@ function undoCheckRow() {
 
 document.addEventListener('keydown', (e) => {
   if (state.tab !== 'transactions' || gridEdit) return;
-  if (e.key !== 'Insert' && e.key !== '-' && e.key !== 'Backspace') return;
+  if (!['Insert', '-', 'Backspace', '='].includes(e.key)) return;
   // 입력 중일 땐 원래 동작 유지 — 다만 방금 누른 체크 네모는 예외
   // (줄을 클릭해 체크하면 그 네모가 포커스를 갖는데, 이때도 '='로 이어서 체크되어야 한다)
   if (e.target.closest('select, textarea')) return;
@@ -2249,7 +2259,8 @@ document.addEventListener('keydown', (e) => {
   if (inp && !(inp.type === 'checkbox' && inp.closest('#txRows'))) return;
   if (!$('#modal').classList.contains('hidden')) return;
   e.preventDefault();
-  if (e.key === 'Insert') checkNextRow();
+  if (e.key === '=') flipRowKind(gridCursor.r, false); // 지금 줄의 참조를 뒤집는다
+  else if (e.key === 'Insert') checkNextRow();
   else if (e.key === '-') skipNextRow();
   else undoCheckRow();
 });
