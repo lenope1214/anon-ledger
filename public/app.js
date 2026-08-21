@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.19.6'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.19.7'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -1824,8 +1824,10 @@ function applyCellValue() {
     applySupplyValue(row, value);
   } else if (['qty', 'price', 'paid'].includes(field)) {
     row[field] = value === '' ? '' : cellNum(value);
+    if (value !== '') leaveMoneyOnly(row);
   } else {
     row[field] = value;
+    if (['name', 'spec'].includes(field) && value !== '') leaveMoneyOnly(row);
   }
   if (row.kind === 'new' && field === 'date') state.entryDate = value;
   // 화면 숫자는 서버 응답을 기다리지 않고 그 자리에서 다시 계산한다
@@ -1833,6 +1835,19 @@ function applyCellValue() {
   paintRow(r);
   updateSummaryOnly();
   return r;
+}
+
+// 입금·출금 줄에 품목·수량·단가를 적으면 물건이 오가는 참조로 바꾼다
+// (입금 → 매출, 출금 → 매입)
+function leaveMoneyOnly(row) {
+  if (!isMoneyOnly(row.txKind)) return;
+  const amount = Math.abs(Number(row.supply) || 0);
+  row.txKind = kindOf(row.txKind) === 'deposit' ? 'sale' : 'purchase';
+  // 적어 둔 금액이 있으면 수량 1·단가 그 금액으로 옮겨 금액이 사라지지 않게 한다
+  if (amount && (row.qty === '' || row.qty == null) && (row.price === '' || row.price == null)) {
+    row.qty = OUT_KINDS.includes(kindOf(row.txKind)) ? -1 : 1;
+    row.price = amount;
+  }
 }
 
 const rowVatMode = (row) => (row.kind === 'tx' && row.tx && row.tx.vatMode) || state.entryVat;
@@ -2055,7 +2070,7 @@ function updateSummaryOnly() {
 /* ── 셀 사이 이동 ── */
 function editableFields(row) {
   if (!row) return GRID_COLS;
-  if (isMoneyOnly(row.txKind)) return ['date', 'company', 'supply', 'memo']; // 입금·출금은 금액 한 칸만
+  // 입금·출금 줄에서도 품목·수량·단가를 적을 수 있다 (적으면 매출·매입으로 바뀐다)
   if (row.kind === 'tx' && row.multi) return ['date', 'company', 'memo'];    // 품목은 팝업에서 고친다
   return GRID_COLS;
 }
