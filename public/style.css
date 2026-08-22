@@ -938,7 +938,6 @@ body.easy .fab, body.easy .fab-help { display: none; }
 
   /* 입금·출금 줄에는 품목·수량·단가가 없다 — 빈 라벨을 감춘다 */
   #txRows tr.row-money td[data-f="name"],
-  #txRows tr.row-money td[data-f="spec"],
   #txRows tr.row-money td[data-f="qty"],
   #txRows tr.row-money td[data-f="price"] { display: none; }
 
@@ -964,8 +963,6 @@ body.easy .fab, body.easy .fab-help { display: none; }
   .grid-table tr.row-new td[data-f="supply"]::before { content: '금액 '; font-size: 0.75rem; color: var(--sub); }
   .grid-table tr.row-money td[data-f="supply"] { display: block; }
   .grid-table tr.row-money td[data-f="supply"]::before { content: '금액 '; font-size: 0.75rem; color: var(--sub); }
-  .grid-table td[data-f="spec"]:not(:empty)::before { content: '규격 '; font-size: 0.75rem; color: var(--sub); }
-  .grid-table tr:not(.row-new) td[data-f="spec"]:empty { display: none; }
 
   /* 공급가액·세액은 화면이 좁을 때 감춘다 (합계로 충분) */
   .grid-table td[data-f="supply"], .grid-table td[data-f="tax"] { display: none; }
@@ -982,7 +979,6 @@ body.easy .fab, body.easy .fab-help { display: none; }
   .grid-table td[data-f="company"] { order: 3; }
   .grid-table td.actions { order: 4; margin-left: auto; display: flex; gap: 0.25rem; }
   .grid-table td[data-f="name"] { order: 5; }
-  .grid-table td[data-f="spec"] { order: 6; }
   .grid-table td[data-f="qty"] { order: 7; }
   .grid-table td[data-f="price"] { order: 8; }
   .grid-table td[data-f="supply"] { order: 9; }
@@ -1006,13 +1002,11 @@ body.easy .fab, body.easy .fab-help { display: none; }
   /* 빈 줄은 한 줄로 짧게 (규격은 적기 시작하면 나온다) */
   .grid-table tr.row-new { background: #fbfdff; }
   .grid-table tr.row-new td[data-f="name"] { flex: 1 1 auto; }
-  .grid-table tr.row-new td[data-f="spec"],
   .grid-table tr.row-new td[data-f="memo"],
   .grid-table tr.row-new td[data-f="total"],
   .grid-table tr.row-new td.chk,
   .grid-table tr.row-new td.actions { display: none; }
   /* 적기 시작하면 필요한 칸이 모두 나온다 */
-  .grid-table tr.row-new:has(td.cell-editing) td[data-f="spec"],
   .grid-table tr.row-new:has(td.cell-editing) td[data-f="memo"],
   .grid-table tr.row-new:has(td.cell-editing) td[data-f="total"] { display: block; }
   .grid-table tr.row-new:has(td.cell-editing) td[data-f="name"] { flex: 0 0 100%; }
