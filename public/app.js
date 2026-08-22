@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.21.6'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.21.7'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -16,7 +16,8 @@ const state = {
   txCompanyId: '',      // 거래관리 탭 필터 ('' = 전체)
   productsCache: {},    // 자동완성용 상호별 제품 캐시
   entryVat: 'separate', // 빠른 입력 행의 부가세 방식
-  entryKind: 'sale',    // 새로 적는 줄의 참조(구분)
+  entryKind: 'credit_sale', // 새로 적는 줄의 참조(구분) — 기본은 외출
+                            // (그달에는 외출로 적고, 다음달 1일에 지난달 것을 매출로 바꿔 쓰는 방식)
   txKindFilter: '',     // 거래 필터: '' 전체 / 참조 이름
   entryDate: '',        // 빠른 입력 행에서 마지막으로 쓴 날짜
   entryCompanyId: '',   // 빠른 입력 행에서 마지막으로 쓴 상호
@@ -28,7 +29,8 @@ state.easyMode = false; // 큰 글씨 간편 입력 (휴대폰·어르신용)
 try {
   const savedVat = localStorage.getItem('entryVat');
   if (savedVat && ['separate', 'included', 'none'].includes(savedVat)) state.entryVat = savedVat;
-  const savedKind = localStorage.getItem('entryKind');
+  // 기본값을 외출로 바꾸면서 저장 키도 바꿨다 — 예전에 기기에 남아 있던 '매출'을 물려받지 않게
+  const savedKind = localStorage.getItem('entryKind2');
   if (savedKind) state.entryKind = savedKind;
   state.easyMode = localStorage.getItem('easyMode') === '1';
 } catch (e) { /* localStorage 사용 불가 환경 */ }
@@ -928,6 +930,10 @@ async function renderTransactions() {
         <button id="btnAddTx" title="한 거래에 품목을 여러 개 적습니다">＋품목</button>
         <button id="btnEasyOn" title="글씨를 크게 해서 하나씩 입력합니다">🔎큰글씨</button>
         <button type="button" id="btnPin" class="pin-btn" title="저장 후 커서가 돌아갈 칸 고정 (F2)">📌<span id="pinLabel" class="pin-label">고정</span></button>
+        <select id="selKind" class="vat-select" disabled title="고른 줄의 참조를 한꺼번에 바꿉니다">
+          <option value="">🔁참조</option>
+          ${KIND_LIST.map((k) => `<option value="${k}">${KINDS[k].label}로</option>`).join('')}
+        </select>
         <button type="button" id="btnDelSel" class="danger del-sel" disabled title="선택한 줄을 모두 지웁니다 (Delete 키)">🗑삭제</button>
         <button type="button" id="btnTxCsv" title="지금 조건 그대로 엑셀로 내려받기">📄엑셀</button>
         <button type="button" id="btnFullscreen" title="전체화면으로 크게 보기 (F11과 같음)">⛶전체</button>
@@ -999,7 +1005,7 @@ async function renderTransactions() {
   $('#entryKind').addEventListener('change', (e) => {
     state.entryKind = kindOf(e.target.value);
     try {
-      localStorage.setItem('entryKind', state.entryKind);
+      localStorage.setItem('entryKind2', state.entryKind);
     } catch (err) { /* 무시 */ }
     // 아직 적지 않은 빈 줄들은 새 구분을 따라간다
     gridRows.forEach((r, i) => {
@@ -1020,6 +1026,11 @@ async function renderTransactions() {
     addRowFromEmptySpace();
   });
   $('#btnDelSel').addEventListener('click', deleteSelectedRows);
+  $('#selKind').addEventListener('change', (e) => {
+    const k = e.target.value;
+    e.target.value = '';
+    if (k) changeSelectedKind(k);
+  });
   $('#btnTxCsv').addEventListener('click', exportTransactionsCsv);
   $('#btnFullscreen').addEventListener('click', toggleFullscreen);
   $('#btnEasyOn').addEventListener('click', () => setEasyMode(true));
@@ -1178,7 +1189,7 @@ async function renderTransactionsEasy() {
   $('#xKind').addEventListener('change', (e) => {
     state.entryKind = kindOf(e.target.value);
     try {
-      localStorage.setItem('entryKind', state.entryKind);
+      localStorage.setItem('entryKind2', state.entryKind);
     } catch (err) { /* 무시 */ }
   });
   $('#xVat').addEventListener('change', (e) => {
@@ -2469,6 +2480,11 @@ function updateSelSummary() {
     delBtn.disabled = !sel.length;
     delBtn.textContent = sel.length ? `🗑삭제 ${sel.length}` : '🗑삭제';
   }
+  const kindSel = $('#selKind');
+  if (kindSel) {
+    kindSel.disabled = !sel.length;
+    kindSel.options[0].textContent = sel.length ? `🔁참조 ${sel.length}` : '🔁참조';
+  }
   if (!el) return;
   if (!sel.length) {
     el.innerHTML = '';
@@ -2482,12 +2498,22 @@ function updateSelSummary() {
     (saleSum || !buySum ? ` 매출 ${won(saleSum)}원` : '') +
     (buySum ? ` 매입 ${won(buySum)}원` : '') +
     (saleSum && buySum ? ` · 이익 ${won(saleSum - buySum)}원` : '') +
+    ` <select id="selKindInline" class="bundle-btn" title="고른 줄의 참조를 한꺼번에 바꿉니다">
+        <option value="">🔁 참조를 바꾸기…</option>
+        ${KIND_LIST.map((k) => `<option value="${k}">${KINDS[k].label}로 바꾸기</option>`).join('')}
+      </select>` +
     (canBundle ? ' <button type="button" id="btnBundleSheet" class="bundle-btn">🧾 선택한 것 한 장으로</button>' : '') +
     ' <button type="button" id="btnDelSelInline" class="bundle-btn del-sel">🗑 선택한 것 지우기</button>';
   const btn = $('#btnBundleSheet');
   if (btn) btn.addEventListener('click', openBundleStatement);
   const del = $('#btnDelSelInline');
   if (del) del.addEventListener('click', deleteSelectedRows);
+  const ks = $('#selKindInline');
+  if (ks) ks.addEventListener('change', (e) => {
+    const k = e.target.value;
+    e.target.value = '';
+    if (k) changeSelectedKind(k);
+  });
 }
 
 // 고정된 머리글·입력 행에 가려지지 않게 스크롤한다 (다음 줄까지 한 줄 더 보이도록)
@@ -3254,6 +3280,75 @@ function partyTableEditable(c) {
 }
 
 // 체크한 줄을 한꺼번에 지운다 (컴장부 상단 [삭제]와 같은 기능)
+// 고른 줄의 참조를 한 줄에 하나씩 바꾼다.
+// 되돌려주는 값: 'changed' 바꿈 · 'same' 이미 그 참조 · 'skip' 줄 모양이 달라 못 바꿈
+function applyKindToRow(row, kind) {
+  const from = kindOf(row.txKind);
+  if (from === kind) return 'same';
+  const wasMoney = isMoneyOnly(from);
+  const nowMoney = isMoneyOnly(kind);
+  const hasItem = row.multi || !!String(row.name || '').trim();
+  // 품목이 있는 줄을 '금액만 있는 줄'로, 또는 그 반대로는 바꾸지 않는다 (내용이 사라지므로)
+  if (nowMoney && hasItem) return 'skip';
+  if (wasMoney && !nowMoney) return 'skip';
+
+  row.txKind = kind;
+  if (nowMoney) {
+    // 입금은 +, 출금은 − (크기는 그대로)
+    const size = Math.abs(Number(row.supply) || 0);
+    row.supply = kind === 'deposit' ? size : -size;
+    row.total = row.supply;
+    row.tax = 0;
+    return 'changed';
+  }
+  // 물건이 오가는 방향이 바뀌면 수량 부호도 함께 뒤집는다 (컴장부 부호 규칙)
+  if (OUT_KINDS.includes(from) !== OUT_KINDS.includes(kind)) {
+    if (row.multi && row.tx && row.tx.items) row.tx.items.forEach((it) => { it.qty = -(Number(it.qty) || 0); });
+    else row.qty = -(Number(row.qty) || 0);
+  }
+  if (!row.multi) recalcRowAmounts(row);
+  return 'changed';
+}
+
+// 체크한 줄의 참조를 한꺼번에 바꾼다
+// (달마다 지난달 '외출'을 '매출'로 넘기는 정리에 쓴다)
+async function changeSelectedKind(kind) {
+  if (!KINDS[kind]) return;
+  const sel = txCache.filter((t) => checkedTxIds.has('t' + t.id));
+  if (!sel.length) return toast('먼저 줄 왼쪽 네모를 눌러(또는 Ins 키로) 바꿀 줄을 고르세요.');
+  const label = KINDS[kind].label;
+  const ok = await askConfirm(`고른 ${sel.length}건의 참조를 '${label}'로 바꿀까요?`, {
+    title: '참조 한꺼번에 바꾸기',
+    note: '물건이 오가는 방향이 달라지면 수량 부호도 같이 맞춥니다.',
+    okText: `${label}로 바꾸기`,
+    icon: '🔁',
+  });
+  if (!ok) return;
+
+  let done = 0;
+  let same = 0;
+  let skipped = 0;
+  for (const row of gridRows.filter((r) => r.kind === 'tx' && checkedTxIds.has('t' + r.id))) {
+    const res = applyKindToRow(row, kind);
+    if (res === 'same') { same += 1; continue; }
+    if (res === 'skip') { skipped += 1; continue; }
+    try {
+      await api('PUT', '/api/transactions/' + row.id, txPayload(row, false));
+      done += 1;
+    } catch (e) {
+      toast('⚠ 일부를 바꾸지 못했습니다 — ' + (e.message || '연결을 확인하세요'));
+      break;
+    }
+  }
+  clearProductsCache();
+  await refreshCompanies();
+  await drawTxRows();
+  const tail = [same ? `${same}건은 이미 ${label}` : '', skipped ? `${skipped}건은 줄 모양이 달라 건너뜀` : '']
+    .filter(Boolean)
+    .join(' · ');
+  toast(`참조를 ${done}건 '${label}'로 바꿨습니다.${tail ? ' (' + tail + ')' : ''}`);
+}
+
 async function deleteSelectedRows() {
   const sel = txCache.filter((t) => checkedTxIds.has('t' + t.id));
   if (!sel.length) return toast('먼저 줄 왼쪽 네모를 눌러(또는 Ins 키로) 지울 줄을 고르세요.');
