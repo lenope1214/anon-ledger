@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.21.4'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.21.5'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -118,6 +118,91 @@ $('#modal').addEventListener('click', (e) => {
   if (e.target.id === 'modal') closeModal();
 });
 
+/* ─────────────── 알림·확인 창 ───────────────
+   브라우저 기본 alert/confirm 은 글씨가 작고 브라우저마다 생김새가 달라
+   같은 모양의 우리 창으로 바꿨다. 쓰는 법은 기본 창과 거의 같다.
+     if (!(await askConfirm('지울까요?'))) return;
+     await showAlert('저장했습니다.');
+   결과는 확인이면 true, 취소·ESC·바깥 클릭이면 false 다. */
+let dlgResolve = null;
+let dlgPrevFocus = null;
+const dialogOpen = () => !$('#dlg').classList.contains('hidden');
+const nl2br = (v) => esc(String(v == null ? '' : v)).replace(/\n/g, '<br>');
+
+function openDialog(opt) {
+  const o = Object.assign(
+    { kind: 'confirm', title: '', message: '', note: '', icon: '', okText: '확인', cancelText: '취소', danger: false },
+    opt
+  );
+  if (dlgResolve) closeDialog(false); // 창이 이미 떠 있으면 먼저 닫는다
+  $('#dlgIcon').textContent = o.icon || (o.danger ? '🗑' : o.kind === 'alert' ? '❗' : '❓');
+  $('#dlgTitle').textContent = o.title || (o.kind === 'alert' ? '알림' : '확인');
+  $('#dlgMsg').innerHTML = nl2br(o.message) + (o.note ? `<span class="dlg-note">${nl2br(o.note)}</span>` : '');
+  const ok = $('#dlgOk');
+  const cancel = $('#dlgCancel');
+  ok.textContent = o.okText;
+  ok.className = o.danger ? 'danger' : 'primary';
+  cancel.textContent = o.cancelText;
+  cancel.classList.toggle('hidden', o.kind === 'alert');
+  dlgPrevFocus = document.activeElement;
+  const back = $('#dlg');
+  back.classList.remove('hidden');
+  back.setAttribute('aria-hidden', 'false');
+  setTimeout(() => ok.focus(), 0);
+  return new Promise((resolve) => {
+    dlgResolve = resolve;
+  });
+}
+
+function closeDialog(result) {
+  const back = $('#dlg');
+  if (back.classList.contains('hidden')) return;
+  back.classList.add('hidden');
+  back.setAttribute('aria-hidden', 'true');
+  const done = dlgResolve;
+  dlgResolve = null;
+  // 창을 열기 전에 적던 자리로 커서를 돌려준다
+  const prev = dlgPrevFocus;
+  dlgPrevFocus = null;
+  if (prev && document.contains(prev) && typeof prev.focus === 'function') {
+    try { prev.focus({ preventScroll: true }); } catch (_) { prev.focus(); }
+  }
+  if (done) done(result);
+}
+
+const askConfirm = (message, opt) => openDialog(Object.assign({ kind: 'confirm', message }, opt));
+const showAlert = (message, opt) => openDialog(Object.assign({ kind: 'alert', message }, opt));
+
+$('#dlgOk').addEventListener('click', () => closeDialog(true));
+$('#dlgCancel').addEventListener('click', () => closeDialog(false));
+$('#dlg').addEventListener('click', (e) => {
+  if (e.target.id === 'dlg') closeDialog(false); // 바깥을 누르면 취소
+});
+
+// 창이 떠 있는 동안 눌린 키는 장부(=·Space·Delete·Tab 등)로 흘려보내지 않는다
+document.addEventListener('keydown', (e) => {
+  if (!dialogOpen()) return;
+  e.stopPropagation();
+  const ok = $('#dlgOk');
+  const cancel = $('#dlgCancel');
+  const onlyOk = cancel.classList.contains('hidden');
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    closeDialog(false);
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    closeDialog(onlyOk || document.activeElement !== cancel);
+  } else if (e.key === ' ' || e.key === 'Spacebar') {
+    // 장부에서 Space 로 줄을 고르던 버릇 때문에 실수로 눌리지 않도록 막는다
+    // (버튼에 커서가 있으면 Space 가 그 버튼을 누른 것으로 처리되기 때문)
+    e.preventDefault();
+  } else if (['ArrowLeft', 'ArrowRight', 'Tab'].includes(e.key)) {
+    e.preventDefault();
+    if (onlyOk) return ok.focus();
+    (document.activeElement === cancel ? ok : cancel).focus();
+  }
+}, true);
+
 /* ─────────────── 탭 ─────────────── */
 $$('#tabs button').forEach((btn) => {
   btn.addEventListener('click', () => {
@@ -218,7 +303,13 @@ function drawCompanyRows() {
       state.txCompanyId = String(id);
       $(`#tabs button[data-tab="transactions"]`).click();
     } else if (btn.dataset.act === 'del') {
-      if (!confirm(`'${c.name}' 상호를 삭제할까요?\n이 상호에 등록된 제품과 거래 내역도 함께 삭제됩니다.`)) return;
+      const ok = await askConfirm(`'${c.name}' 상호를 삭제할까요?`, {
+        title: '상호 삭제',
+        note: '이 상호에 등록된 제품과 거래 내역도 함께 삭제됩니다.',
+        okText: '삭제',
+        danger: true,
+      });
+      if (!ok) return;
       await api('DELETE', '/api/companies/' + id);
       toast('상호를 삭제했습니다.');
       renderCompanies();
@@ -629,7 +720,7 @@ async function drawProductRows() {
     if (!p) return;
     if (btn.dataset.act === 'edit') openProductForm(p);
     else if (btn.dataset.act === 'del') {
-      if (!confirm(`'${p.name}' 제품을 삭제할까요?`)) return;
+      if (!(await askConfirm(`'${p.name}' 제품을 삭제할까요?`, { title: '제품 삭제', okText: '삭제', danger: true }))) return;
       await api('DELETE', '/api/products/' + id);
       clearProductsCache();
       toast('제품을 삭제했습니다.');
@@ -1217,7 +1308,12 @@ async function drawEasyList() {
     if (!t) return;
     if (act === 'sheet') openStatement(t);
     else if (act === 'del') {
-      if (!confirm(`${t.date} '${t.companyName}' 거래를 지울까요?`)) return;
+      const ok = await askConfirm(`${t.date} '${t.companyName}' 거래를 지울까요?`, {
+        title: '거래 삭제',
+        okText: '삭제',
+        danger: true,
+      });
+      if (!ok) return;
       await api('DELETE', '/api/transactions/' + id);
       toast('지웠습니다.');
       await refreshCompanies();
@@ -1416,8 +1512,25 @@ function handleEntryKeys(e, save) {
 /* ─────────────── 이전 품목 그대로 적기 ─────────────── */
 // 품명을 비운 채 넘어가거나 저장하면 직전에 적은 품목을 그대로 불러온다.
 // 선택된 상호의 마지막 거래를 우선 쓰고, 없으면 전체 마지막 거래를 쓴다.
-function getLastItem() {
-  const cid = Number(state.entryCompanyId) || 0;
+// 직전에 적은 품목을 찾는다.
+//  · 먼저 시트에 보이는 줄을 아래에서 위로 훑는다 — 아직 저장되지 않은 줄도 그대로 쓴다
+//    (저장이 늦거나 실패한 줄 때문에 '한식'이 안 따라오던 문제)
+//  · 같은 거래처 줄을 먼저 보고, 없으면 상관없이 마지막 줄
+//  · 시트에 아무것도 없으면 저장된 거래(txCache)에서 찾는다
+function getLastItem(forRow) {
+  const cid = Number((forRow && forRow.companyId) || state.entryCompanyId) || 0;
+  const pick = (r) => ({ name: String(r.name).trim(), spec: r.spec || '', price: r.price, qty: r.qty });
+  const fromSheet = (sameCompany) => {
+    for (let i = gridRows.length - 1; i >= 0; i--) {
+      const r = gridRows[i];
+      if (!r || r === forRow || !String(r.name || '').trim()) continue;
+      if (sameCompany && Number(r.companyId) !== cid) continue;
+      return pick(r);
+    }
+    return null;
+  };
+  const hit = (cid && fromSheet(true)) || fromSheet(false);
+  if (hit) return hit;
   const src = (cid && txCache.find((t) => t.companyId === cid)) || txCache[0];
   if (!src || !src.items.length) return null;
   const it = src.items[src.items.length - 1];
@@ -1524,10 +1637,11 @@ function rowHtml(row, i) {
     money ? 'row-money' : '',
     checked ? 'row-checked' : '',
     isNew ? 'row-new' : '',
+    row.unsaved ? 'row-unsaved' : '', // 아직 저장되지 않은 줄 (맨 아래 적는 줄은 빼고)
   ].filter(Boolean).join(' ');
   return `<tr data-r="${i}" data-kind="${row.kind}" data-id="${row.id || ''}" class="${rowCls}">
     <td class="chk">${key ? `<input type="checkbox" ${checked ? 'checked' : ''}>` : ''}</td>
-    <td class="rowno">${row.no || ''}</td>
+    <td class="rowno"${row.unsaved ? ' title="아직 저장되지 않은 줄입니다 — 줄 끝에서 Enter를 한 번 더 눌러 보세요"' : ''}>${row.no || ''}</td>
     ${cell('date')}
     ${cell('company', 'cell-company')}
     ${cell('name')}
@@ -1643,10 +1757,15 @@ function addRowFromEmptySpace() {
 }
 
 // No 를 다시 매긴다 — 저장된 줄만 1,2,3… (저장 안 된 줄은 번호 없음)
+// 저장된 줄만 1,2,3… 으로 번호를 매긴다.
+// 맨 아래 적는 줄이 아닌데 아직 저장되지 않은 줄은 '!' 로 표시해 눈에 띄게 한다
 function renumberRows() {
   let n = 0;
-  gridRows.forEach((r) => {
-    r.no = r.kind === 'tx' ? ++n : '';
+  const lastNew = gridRows.reduce((acc, r, i) => (r.kind === 'new' ? i : acc), -1);
+  gridRows.forEach((r, i) => {
+    if (r.kind === 'tx') { r.no = ++n; r.unsaved = false; return; }
+    r.unsaved = i !== lastNew && !isUntouchedBlank(r);
+    r.no = r.unsaved ? '!' : '';
   });
 }
 
@@ -1820,7 +1939,12 @@ async function handleRowAction(btn) {
   if (!t) return;
   if (act === 'sheet') return openStatement(t);
   if (act === 'del') {
-    if (!confirm(`${t.date} '${t.companyName}' 거래를 삭제할까요?`)) return;
+    const ok = await askConfirm(`${t.date} '${t.companyName}' 거래를 삭제할까요?`, {
+      title: '거래 삭제',
+      okText: '삭제',
+      danger: true,
+    });
+    if (!ok) return;
     await api('DELETE', '/api/transactions/' + id);
     checkedTxIds.delete('t' + id);
     toast('거래를 삭제했습니다.');
@@ -1876,6 +2000,7 @@ async function openCellEditor(r, field) {
   input.addEventListener('keydown', onCellKey);
   input.addEventListener('blur', () => setTimeout(() => {
     if (gridSearching) return; // 검색창으로 옮겨간 것뿐이므로 그대로 둔다
+    if (dialogOpen()) return;  // 확인창이 떠 있는 동안은 적던 칸을 그대로 둔다
     if (gridEdit && gridEdit.input === input && document.activeElement !== input) commitCellNow(true);
   }, 120));
 }
@@ -2013,18 +2138,26 @@ const isLastPendingSave = (r) => (pendingSaves.get(r) || 0) <= 1;
 function queueRowSave(r, mayLeave) {
   if (r == null || !gridRows[r]) return Promise.resolve();
   pendingSaves.set(r, (pendingSaves.get(r) || 0) + 1);
-  gridSaveChain = gridSaveChain.then(async () => {
-    try {
-      const row = gridRows[r];
-      if (!row) return;
-      if (row.kind === 'tx') await saveExistingRow(row, r);
-      else if (mayLeave) await saveNewRowIfReady(r);
-    } finally {
-      const left = (pendingSaves.get(r) || 1) - 1;
-      if (left > 0) pendingSaves.set(r, left);
-      else pendingSaves.delete(r);
-    }
-  });
+  gridSaveChain = gridSaveChain
+    .then(async () => {
+      try {
+        const row = gridRows[r];
+        if (!row) return;
+        if (row.kind === 'tx') await saveExistingRow(row, r);
+        else if (mayLeave) await saveNewRowIfReady(r);
+      } finally {
+        const left = (pendingSaves.get(r) || 1) - 1;
+        if (left > 0) pendingSaves.set(r, left);
+        else pendingSaves.delete(r);
+      }
+    })
+    .catch((e) => {
+      // 한 줄이 잘못돼도 뒤에 줄 서 있는 저장까지 끊기면 안 된다.
+      // 예전에는 여기서 줄서기가 끊겨, 그 뒤로 적은 줄이 소리 없이 저장되지 않았다
+      // (화면에는 적혀 있는데 '거래 0건'으로 나오던 문제)
+      console.error(e);
+      toast('⚠ 저장하지 못했습니다 — ' + ((e && e.message) || '연결을 확인하세요'));
+    });
   return gridSaveChain;
 }
 
@@ -2115,6 +2248,9 @@ async function saveNewRowIfReady(r) {
     updateSummaryOnly();
     return true;
   } catch (e) {
+    // 저장이 안 됐다는 걸 바로 알아볼 수 있게 그 줄에 '!' 표시를 남긴다
+    renumberRows();
+    paintRow(r);
     toast('⚠ 저장하지 못했습니다 — ' + (e.message || '연결을 확인하세요'));
     return false;
   }
@@ -2122,7 +2258,7 @@ async function saveNewRowIfReady(r) {
 
 // 품명을 비워둔 채 저장하면 직전 품목을 그대로 가져온다
 function fillNewRowFromLast(row) {
-  const last = getLastItem();
+  const last = getLastItem(row);
   if (!last || !last.name) return false;
   row.name = last.name;
   row.spec = last.spec; // 규격은 화면에 없지만 값은 그대로 이어 쓴다
@@ -3054,7 +3190,13 @@ async function deleteSelectedRows() {
   if (!sel.length) return toast('먼저 줄 왼쪽 네모를 눌러(또는 Ins 키로) 지울 줄을 고르세요.');
   const first = sel[0];
   const more = sel.length > 1 ? ` 외 ${sel.length - 1}건` : '';
-  if (!confirm(`선택한 ${sel.length}건을 지울까요?\n\n${first.date} ${first.companyName}${more}\n\n지운 내역은 되돌릴 수 없습니다.`)) return;
+  const ok = await askConfirm(`선택한 ${sel.length}건을 지울까요?\n${first.date} ${first.companyName}${more}`, {
+    title: '선택한 줄 삭제',
+    note: '지운 내역은 되돌릴 수 없습니다.',
+    okText: `${sel.length}건 삭제`,
+    danger: true,
+  });
+  if (!ok) return;
   let done = 0;
   for (const t of sel) {
     try {
@@ -3332,11 +3474,17 @@ async function renderAdmin() {
         await api('POST', '/api/admin/users/' + encodeURIComponent(username) + '/approve');
         toast(`'${username}' 계정을 승인했습니다.`);
       } else if (act === 'reject') {
-        if (!confirm(`'${username}' 계정의 이용을 거절할까요?`)) return;
+        if (!(await askConfirm(`'${username}' 계정의 이용을 거절할까요?`, { title: '가입 거절', okText: '거절', danger: true }))) return;
         await api('POST', '/api/admin/users/' + encodeURIComponent(username) + '/reject');
         toast(`'${username}' 계정을 거절했습니다.`);
       } else if (act === 'del') {
-        if (!confirm(`'${username}' 계정을 삭제할까요?\n이 계정의 장부 데이터도 모두 삭제됩니다.`)) return;
+        const ok = await askConfirm(`'${username}' 계정을 삭제할까요?`, {
+          title: '계정 삭제',
+          note: '이 계정의 장부 데이터도 모두 삭제됩니다.',
+          okText: '삭제',
+          danger: true,
+        });
+        if (!ok) return;
         await api('DELETE', '/api/admin/users/' + encodeURIComponent(username));
         toast(`'${username}' 계정을 삭제했습니다.`);
       }
