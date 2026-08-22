@@ -291,6 +291,8 @@ form label input, form label select { margin-top: 0.2rem; font-weight: 400; }
   background: #eff6ff;
 }
 .bundle-btn:hover { background: #dbeafe; }
+/* 요약줄의 [참조 바꾸기]는 선택칸이지만 옆 버튼과 같은 모양으로 보이게 한다 */
+select.bundle-btn { border: 1px solid #93c5fd; border-radius: 6px; height: auto; line-height: 1.35; }
 .del-sel { color: var(--danger); border-color: #fecaca; background: #fef2f2; }
 .del-sel:hover:not(:disabled) { background: #fee2e2; }
 .del-sel:disabled { color: #cbd5e1; border-color: var(--line); background: var(--card); cursor: default; }
