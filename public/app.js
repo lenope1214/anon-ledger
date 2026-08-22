@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.20.5'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.20.6'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -855,7 +855,7 @@ async function renderTransactions() {
         <span><b>↑↓←→</b> 칸 이동</span>
         <span><b>Tab</b> 검색</span>
         <span><b>=</b> 참조 반전</span>
-        <span><b>Ins</b> 연속 선택 · <b>Del</b> 선택 삭제</span>
+        <span><b>Ins</b>·<b>Space</b> 연속 선택 · <b>Del</b> 선택 삭제</span>
         <span><b>F2</b> 커서 고정</span>
         <button type="button" id="btnHelpInline" class="link-btn">사용법</button>
       </p>
@@ -2349,7 +2349,8 @@ function undoCheckRow() {
 
 document.addEventListener('keydown', (e) => {
   if (state.tab !== 'transactions' || gridEdit) return;
-  if (!['Insert', '-', 'Backspace', '=', 'Delete'].includes(e.key)) return;
+  // Ins 는 맥 키보드에 없어서 Space 로도 연속 선택이 되게 한다
+  if (!['Insert', ' ', 'Spacebar', '-', 'Backspace', '=', 'Delete'].includes(e.key)) return;
   // 입력 중일 땐 원래 동작 유지 — 다만 방금 누른 체크 네모는 예외
   // (줄을 클릭해 체크하면 그 네모가 포커스를 갖는데, 이때도 '='로 이어서 체크되어야 한다)
   if (e.target.closest('select, textarea')) return;
@@ -2359,7 +2360,7 @@ document.addEventListener('keydown', (e) => {
   e.preventDefault();
   if (e.key === 'Delete') deleteSelectedRows();         // 고른 줄을 한꺼번에 지운다
   else if (e.key === '=') flipRowKind(gridCursor.r, false); // 지금 줄의 참조를 뒤집는다
-  else if (e.key === 'Insert') checkNextRow();
+  else if (e.key === 'Insert' || e.key === ' ' || e.key === 'Spacebar') checkNextRow();
   else if (e.key === '-') skipNextRow();
   else undoCheckRow();
 });
