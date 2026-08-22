@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.21.0'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.21.1'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -1896,10 +1896,8 @@ function applyCellValue() {
   if (!row) return null;
 
   if (field === 'company') {
-    // 거래처를 비운 채 칸을 떠나면 직전에 적은 거래처를 그대로 쓴다
-    const name = value || (row.kind === 'new' ? prefillCompanyName() || (txCache[0] && txCache[0].companyName) || '' : value);
-    row.companyName = name;
-    const found = state.companies.find((c) => c.name.toLowerCase() === name.toLowerCase());
+    row.companyName = value;
+    const found = state.companies.find((c) => c.name.toLowerCase() === value.toLowerCase());
     row.companyId = found ? found.id : 0;
     if (found) state.entryCompanyId = String(found.id);
   } else if (field === 'supply') {
