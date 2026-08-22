@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.21.3'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.21.4'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -1588,8 +1588,14 @@ function setCursorRow(i) {
 }
 
 // 아무것도 안 적힌 빈 줄인지
-// 빈 줄에 자동으로 채워지는 거래처 이름 (직전에 쓴 거래처)
+// 빈 줄에 자동으로 채워지는 거래처 이름
+//  · 지금 시트에 보이는 마지막(맨 아래) 거래처를 먼저 쓰고
+//  · 시트에 저장된 줄이 없으면 직전에 쓴 거래처를 쓴다
 function prefillCompanyName() {
+  for (let i = gridRows.length - 1; i >= 0; i--) {
+    const r = gridRows[i];
+    if (r.kind === 'tx' && String(r.companyName || '').trim()) return String(r.companyName).trim();
+  }
   const c = state.companies.find((x) => String(x.id) === String(state.entryCompanyId));
   return c ? c.name : '';
 }
@@ -1853,10 +1859,7 @@ async function openCellEditor(r, field) {
     raw = row.price === '' || row.price == null ? '' : c.supply;
   }
   input.value = field === 'date' && !raw && row.kind === 'new' ? state.entryDate || today() : raw == null ? '' : raw;
-  if (field === 'company' && row.kind === 'new' && !raw) {
-    const c = state.companies.find((x) => String(x.id) === String(state.entryCompanyId));
-    if (c) input.value = c.name;
-  }
+  if (field === 'company' && row.kind === 'new' && !raw) input.value = prefillCompanyName();
   td.textContent = '';
   td.appendChild(input);
   td.classList.add('cell-editing');
@@ -1897,8 +1900,10 @@ function applyCellValue() {
   if (!row) return null;
 
   if (field === 'company') {
-    row.companyName = value;
-    const found = state.companies.find((c) => c.name.toLowerCase() === value.toLowerCase());
+    // 거래처를 비운 채 칸을 떠나면 시트에 보이는 마지막 거래처를 그 자리에서 불러온다
+    const name = !value && row.kind === 'new' ? prefillCompanyName() : value;
+    row.companyName = name;
+    const found = name ? state.companies.find((c) => c.name.toLowerCase() === name.toLowerCase()) : null;
     row.companyId = found ? found.id : 0;
     if (found) state.entryCompanyId = String(found.id);
   } else if (field === 'supply') {
@@ -2592,7 +2597,7 @@ function drawCompanyPanel(force) {
       .join('') +
     `<label class="co-item co-memo"><span>메모</span>
       <input data-co="memo" data-id="${c.id}" value="${esc(c.memo)}" placeholder=""></label>` +
-    `<span class="co-sum">매출 ${won(c.total)}원${c.buyTotal ? ` · 매입 ${won(c.buyTotal)}원` : ''}</span>`;
+    `<span class="co-sum">외출 ${won(c.creditSale || 0)}원</span>`;
   box.onclick = (e) => {
     if (e.target.tagName === 'INPUT') return; // 칸을 누른 건 수정
     box.classList.toggle('open');
