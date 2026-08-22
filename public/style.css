@@ -88,7 +88,11 @@ body {
 .section-head select { flex: 1 1 200px; }
 
 .summary { color: var(--sub); font-size: 0.8rem; margin: 0 0 0.2rem; }
-.tx-summary { margin: 0 0 0 auto; align-self: center; white-space: nowrap; }
+/* 요약줄은 길어지면 줄바꿈해서 오른쪽으로 넘치지 않게 한다
+   (선택했을 때 [참조 바꾸기]·[한 장으로]·[지우기]까지 붙어 폭을 넘겼다) */
+.tx-summary { margin: 0 0 0 auto; align-self: center; white-space: normal; text-align: right; }
+#txSummary { white-space: nowrap; }
+.sel-summary .nowrap { white-space: nowrap; }
 .hint { color: var(--sub); font-size: 0.75rem; margin-bottom: 0.2rem; }
 .sub { color: var(--sub); font-size: 0.8rem; }
 .warn { color: var(--warn); font-weight: 700; }
@@ -291,8 +295,16 @@ form label input, form label select { margin-top: 0.2rem; font-weight: 400; }
   background: #eff6ff;
 }
 .bundle-btn:hover { background: #dbeafe; }
-/* 요약줄의 [참조 바꾸기]는 선택칸이지만 옆 버튼과 같은 모양으로 보이게 한다 */
-select.bundle-btn { border: 1px solid #93c5fd; border-radius: 6px; height: auto; line-height: 1.35; }
+/* 요약줄의 [참조 바꾸기]는 선택칸이지만 옆 버튼과 같은 모양·크기로 보이게 한다
+   (기본 select 은 width:100% 라 그대로 두면 줄 하나를 통째로 차지한다) */
+select.bundle-btn {
+  width: auto;
+  max-width: 12rem;
+  border: 1px solid #93c5fd;
+  border-radius: 6px;
+  line-height: 1.35;
+  vertical-align: middle;
+}
 .del-sel { color: var(--danger); border-color: #fecaca; background: #fef2f2; }
 .del-sel:hover:not(:disabled) { background: #fee2e2; }
 .del-sel:disabled { color: #cbd5e1; border-color: var(--line); background: var(--card); cursor: default; }

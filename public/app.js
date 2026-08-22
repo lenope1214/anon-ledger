@@ -930,10 +930,6 @@ async function renderTransactions() {
         <button id="btnAddTx" title="한 거래에 품목을 여러 개 적습니다">＋품목</button>
         <button id="btnEasyOn" title="글씨를 크게 해서 하나씩 입력합니다">🔎큰글씨</button>
         <button type="button" id="btnPin" class="pin-btn" title="저장 후 커서가 돌아갈 칸 고정 (F2)">📌<span id="pinLabel" class="pin-label">고정</span></button>
-        <select id="selKind" class="vat-select" disabled title="고른 줄의 참조를 한꺼번에 바꿉니다">
-          <option value="">🔁참조</option>
-          ${KIND_LIST.map((k) => `<option value="${k}">${KINDS[k].label}로</option>`).join('')}
-        </select>
         <button type="button" id="btnDelSel" class="danger del-sel" disabled title="선택한 줄을 모두 지웁니다 (Delete 키)">🗑삭제</button>
         <button type="button" id="btnTxCsv" title="지금 조건 그대로 엑셀로 내려받기">📄엑셀</button>
         <button type="button" id="btnFullscreen" title="전체화면으로 크게 보기 (F11과 같음)">⛶전체</button>
@@ -1026,11 +1022,6 @@ async function renderTransactions() {
     addRowFromEmptySpace();
   });
   $('#btnDelSel').addEventListener('click', deleteSelectedRows);
-  $('#selKind').addEventListener('change', (e) => {
-    const k = e.target.value;
-    e.target.value = '';
-    if (k) changeSelectedKind(k);
-  });
   $('#btnTxCsv').addEventListener('click', exportTransactionsCsv);
   $('#btnFullscreen').addEventListener('click', toggleFullscreen);
   $('#btnEasyOn').addEventListener('click', () => setEasyMode(true));
@@ -2480,11 +2471,6 @@ function updateSelSummary() {
     delBtn.disabled = !sel.length;
     delBtn.textContent = sel.length ? `🗑삭제 ${sel.length}` : '🗑삭제';
   }
-  const kindSel = $('#selKind');
-  if (kindSel) {
-    kindSel.disabled = !sel.length;
-    kindSel.options[0].textContent = sel.length ? `🔁참조 ${sel.length}` : '🔁참조';
-  }
   if (!el) return;
   if (!sel.length) {
     el.innerHTML = '';
@@ -2494,13 +2480,14 @@ function updateSelSummary() {
   const buySum = Math.abs(sel.filter((t) => IN_KINDS.includes(kindOf(t.kind))).reduce((s, t) => s + t.total, 0));
   const canBundle = sel.some((t) => OUT_KINDS.includes(kindOf(t.kind)));
   el.innerHTML =
-    ` · ☑ 선택 ${sel.length}건:` +
+    `<span class="nowrap"> · ☑ 선택 ${sel.length}건:` +
     (saleSum || !buySum ? ` 매출 ${won(saleSum)}원` : '') +
     (buySum ? ` 매입 ${won(buySum)}원` : '') +
     (saleSum && buySum ? ` · 이익 ${won(saleSum - buySum)}원` : '') +
+    `</span>` +
     ` <select id="selKindInline" class="bundle-btn" title="고른 줄의 참조를 한꺼번에 바꿉니다">
         <option value="">🔁 참조를 바꾸기…</option>
-        ${KIND_LIST.map((k) => `<option value="${k}">${KINDS[k].label}로 바꾸기</option>`).join('')}
+        ${KIND_LIST.map((k) => `<option value="${k}">${withRo(KINDS[k].label)} 바꾸기</option>`).join('')}
       </select>` +
     (canBundle ? ' <button type="button" id="btnBundleSheet" class="bundle-btn">🧾 선택한 것 한 장으로</button>' : '') +
     ' <button type="button" id="btnDelSelInline" class="bundle-btn del-sel">🗑 선택한 것 지우기</button>';
@@ -3280,6 +3267,15 @@ function partyTableEditable(c) {
 }
 
 // 체크한 줄을 한꺼번에 지운다 (컴장부 상단 [삭제]와 같은 기능)
+// '외출로' · '입금으로' — 받침에 맞춰 조사를 고른다 (ㄹ 받침이나 받침 없음이면 '로')
+const withRo = (word) => {
+  const last = String(word || '').slice(-1);
+  const code = last.charCodeAt(0) - 0xac00;
+  if (!(code >= 0 && code <= 11171)) return word + '로';
+  const jong = code % 28;
+  return word + (jong === 0 || jong === 8 ? '로' : '으로');
+};
+
 // 고른 줄의 참조를 한 줄에 하나씩 바꾼다.
 // 되돌려주는 값: 'changed' 바꿈 · 'same' 이미 그 참조 · 'skip' 줄 모양이 달라 못 바꿈
 function applyKindToRow(row, kind) {
@@ -3320,7 +3316,7 @@ async function changeSelectedKind(kind) {
   const ok = await askConfirm(`고른 ${sel.length}건의 참조를 '${label}'로 바꿀까요?`, {
     title: '참조 한꺼번에 바꾸기',
     note: '물건이 오가는 방향이 달라지면 수량 부호도 같이 맞춥니다.',
-    okText: `${label}로 바꾸기`,
+    okText: `${withRo(label)} 바꾸기`,
     icon: '🔁',
   });
   if (!ok) return;
