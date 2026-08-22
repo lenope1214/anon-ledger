@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.20.6'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.20.7'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -2295,6 +2295,21 @@ function updatePointerHighlight() {
 
 // Ins 연속 체크: 포인터의 다음 행을 체크 (키를 누르고 있으면 반복)
 function checkNextRow() {
+  // 지금 줄이 아직 체크되지 않았으면 그 줄부터 체크한다 (시작 줄이 빠지지 않게)
+  const cur = sheetLastIdx;
+  if (cur != null && cur >= 0 && gridRows[cur] && gridRows[cur].kind === 'tx') {
+    const curTr = rowElAt(cur);
+    const curCb = curTr && curTr.querySelector('input[type="checkbox"]');
+    if (curCb && !curCb.checked) {
+      curCb.checked = true;
+      checkedTxIds.add(rowKey(curTr));
+      curTr.classList.add('row-checked');
+      scrollRowIntoView(curTr);
+      updatePointerHighlight();
+      updateSelSummary();
+      return;
+    }
+  }
   const next = nextSavedRow(sheetLastIdx);
   if (next < 0) {
     toast('마지막 줄입니다.');
