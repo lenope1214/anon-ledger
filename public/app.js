@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.21.2'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.21.3'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -1862,7 +1862,7 @@ async function openCellEditor(r, field) {
   td.classList.add('cell-editing');
   input.focus();
   input.select();
-  gridEdit = { r, field, input, td };
+  gridEdit = { r, field, input, td, orig: input.value };
   gridCursor.r = r;
   gridCursor.field = field;
   drawCompanyPanel();
@@ -1889,9 +1889,10 @@ function closeCellEditor() {
 // 적던 값을 그 자리에서 화면에 반영한다 (저장은 뒤에서 따로)
 function applyCellValue() {
   if (!gridEdit) return null;
-  const { r, field, input } = gridEdit;
+  const { r, field, input, orig } = gridEdit;
   const row = gridRows[r];
   const value = input.value.trim();
+  const changed = value !== String(orig == null ? '' : orig).trim();
   gridEdit = null;
   if (!row) return null;
 
@@ -1901,9 +1902,15 @@ function applyCellValue() {
     row.companyId = found ? found.id : 0;
     if (found) state.entryCompanyId = String(found.id);
   } else if (field === 'supply') {
-    applySupplyValue(row, value);
+    // 손대지 않고 지나가면 수량·단가를 건드리지 않는다 (부호가 뒤집히던 문제)
+    if (changed) applySupplyValue(row, value);
   } else if (['qty', 'price', 'paid'].includes(field)) {
-    row[field] = value === '' ? '' : cellNum(value);
+    if (value === '') row[field] = '';
+    else {
+      const n = cellNum(value);
+      const looksNumeric = /^-?[\d.,\s]+$/.test(value);
+      if (looksNumeric) row[field] = n; // 숫자가 아니면(한글 등) 옛 값을 그대로 둔다
+    }
     if (value !== '') leaveMoneyOnly(row);
   } else {
     row[field] = value;
@@ -2213,6 +2220,8 @@ function startRowEdit(r) {
 function onCellKey(e) {
   const { field, input } = gridEdit || {};
   if (!gridEdit) return;
+  // 한글을 조합하는 중에 누른 키(Enter 등)는 글자를 확정하는 용도이므로 칸을 옮기지 않는다
+  if (e.isComposing || e.keyCode === 229) return;
   if (e.key === 'Enter') {
     e.preventDefault();
     moveCell(0, 1);
