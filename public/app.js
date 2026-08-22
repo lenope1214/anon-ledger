@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.20.7'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.21.0'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -845,7 +845,7 @@ async function renderTransactions() {
 
       <div class="table-wrap ledger-wrap">
         <table class="ledger-table grid-table">
-          <thead><tr><th class="chk"></th><th class="rowno">No</th><th>날짜</th><th>거래처</th><th>품목</th><th>규격</th><th class="num">수량</th><th class="num">단가</th><th class="num">공급가액</th><th>참조</th><th class="num">부가세</th><th class="num">합계</th><th>비고</th><th class="actions"></th></tr></thead>
+          <thead><tr><th class="chk"></th><th class="rowno">No</th><th>날짜</th><th>거래처</th><th>품목</th><th class="num">수량</th><th class="num">단가</th><th class="num">공급가액</th><th>참조</th><th class="num">부가세</th><th class="num">합계</th><th>비고</th><th class="actions"></th></tr></thead>
           <tbody id="txRows"></tbody>
         </table>
       </div>
@@ -1293,7 +1293,7 @@ $('#saveBarBtn').addEventListener('click', async () => {
 // 저장 후 커서가 돌아갈 칸을 지정한다 (지정 전 기본값은 품명).
 // PC: F2, 휴대폰: 📌 버튼. 기기에 기억되어 다음 접속에도 유지된다.
 const PIN_FIELDS = {
-  'g-date': '날짜', 'g-company': '상호', 'g-name': '품명', 'g-spec': '규격',
+  'g-date': '날짜', 'g-company': '상호', 'g-name': '품명',
   'g-qty': '수량', 'g-price': '단가',
   xDate: '날짜', xCompany: '상호', xName: '품명', xQty: '수량',
   xPrice: '단가',
@@ -1453,7 +1453,7 @@ function applyEntryCompany(c) {
 }
 
 /* ─────────────── 엑셀식 셀 입력 그리드 ─────────────── */
-const GRID_COLS = ['date', 'company', 'name', 'spec', 'qty', 'price', 'supply', 'memo'];
+const GRID_COLS = ['date', 'company', 'name', 'qty', 'price', 'supply', 'memo'];
 const BLANK_ROWS = 1;               // 맨 아래에 두는 빈 줄 (항상 한 줄만)
 
 let gridRows = [];                  // 화면에 보이는 줄 (거래·빈 줄)
@@ -1497,7 +1497,7 @@ function cellText(row, field) {
   return v === '' || v == null ? '' : won(v);
 }
 
-const CELL_PH = { date: '날짜', company: '상호', name: '품명', spec: '규격', qty: '수량', price: '단가', supply: '금액', memo: '비고' };
+const CELL_PH = { date: '날짜', company: '상호', name: '품명', qty: '수량', price: '단가', supply: '금액', memo: '비고' };
 
 function rowHtml(row, i) {
   const isNew = row.kind === 'new';
@@ -1531,7 +1531,6 @@ function rowHtml(row, i) {
     ${cell('date')}
     ${cell('company', 'cell-company')}
     ${cell('name')}
-    ${cell('spec')}
     ${cell('qty', 'num')}
     ${cell('price', 'num')}
     ${supplyCell}
@@ -1897,8 +1896,10 @@ function applyCellValue() {
   if (!row) return null;
 
   if (field === 'company') {
-    row.companyName = value;
-    const found = state.companies.find((c) => c.name.toLowerCase() === value.toLowerCase());
+    // 거래처를 비운 채 칸을 떠나면 직전에 적은 거래처를 그대로 쓴다
+    const name = value || (row.kind === 'new' ? prefillCompanyName() || (txCache[0] && txCache[0].companyName) || '' : value);
+    row.companyName = name;
+    const found = state.companies.find((c) => c.name.toLowerCase() === name.toLowerCase());
     row.companyId = found ? found.id : 0;
     if (found) state.entryCompanyId = String(found.id);
   } else if (field === 'supply') {
@@ -1909,6 +1910,8 @@ function applyCellValue() {
   } else {
     row[field] = value;
     if (['name', 'spec'].includes(field) && value !== '') leaveMoneyOnly(row);
+    // 품목을 비운 채 칸을 떠나면 직전에 적은 품목을 그대로 불러온다
+    if (field === 'name' && value === '' && row.kind === 'new' && fillNewRowFromLast(row)) leaveMoneyOnly(row);
   }
   if (row.kind === 'new' && field === 'date') state.entryDate = value;
   // 화면 숫자는 서버 응답을 기다리지 않고 그 자리에서 다시 계산한다
@@ -2110,11 +2113,12 @@ async function saveNewRowIfReady(r) {
 // 품명을 비워둔 채 저장하면 직전 품목을 그대로 가져온다
 function fillNewRowFromLast(row) {
   const last = getLastItem();
-  if (!last) return false;
+  if (!last || !last.name) return false;
   row.name = last.name;
-  row.spec = last.spec;
+  row.spec = last.spec; // 규격은 화면에 없지만 값은 그대로 이어 쓴다
   if (row.price === '' || row.price == null) row.price = last.price;
   if (row.qty === '' || row.qty == null) row.qty = last.qty;
+  if (!isMoneyOnly(row.txKind)) recalcRowAmounts(row);
   return true;
 }
 
