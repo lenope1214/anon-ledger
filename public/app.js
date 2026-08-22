@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.21.1'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.21.2'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -2193,7 +2193,12 @@ function startRowEdit(r) {
     gridRows.push(blankRow());
     renumberRows();
     r = gridRows.length - 1;
-    tbody.insertAdjacentHTML('beforeend', rowHtml(gridRows[r], r));
+    // 빈 격자 줄보다 앞에 넣어야 표 아래로 밀려나지 않는다
+    const filler = tbody.querySelector('tr.grid-filler');
+    const html = rowHtml(gridRows[r], r);
+    if (filler) filler.insertAdjacentHTML('beforebegin', html);
+    else tbody.insertAdjacentHTML('beforeend', html);
+    fillGridSpace();
   }
   const row = gridRows[r];
   if (!row) return;
