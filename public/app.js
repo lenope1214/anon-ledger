@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.21.5'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.21.6'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -1632,6 +1632,8 @@ function rowHtml(row, i) {
   const supplyCell = `<td class="num ${Number(supplyShown) < 0 ? 'neg' : ''}" data-edit="1" data-f="supply" data-ph="공급가액">${
     supplyShown === '' || supplyShown == null ? '' : won(supplyShown)
   }</td>`;
+  // 아직 아무것도 적지 않은 줄은 날짜·참조도 비워 둔다 (적힌 줄처럼 보이지 않게)
+  const looksBlank = isNew && !rowHasContent(row);
   const rowCls = [
     IN_KINDS.includes(kind) ? 'row-buy' : '',
     money ? 'row-money' : '',
@@ -1642,13 +1644,17 @@ function rowHtml(row, i) {
   return `<tr data-r="${i}" data-kind="${row.kind}" data-id="${row.id || ''}" class="${rowCls}">
     <td class="chk">${key ? `<input type="checkbox" ${checked ? 'checked' : ''}>` : ''}</td>
     <td class="rowno"${row.unsaved ? ' title="아직 저장되지 않은 줄입니다 — 줄 끝에서 Enter를 한 번 더 눌러 보세요"' : ''}>${row.no || ''}</td>
-    ${cell('date')}
+    ${looksBlank ? `<td${editable('date')} data-f="date" data-ph="${CELL_PH.date || ''}"></td>` : cell('date')}
     ${cell('company', 'cell-company')}
     ${cell('name')}
     ${cell('qty', 'num')}
     ${cell('price', 'num')}
     ${supplyCell}
-    <td class="kind-cell" data-f="kind" title="눌러서 반대로 바꾸기 (= 키)"><span class="kind-tag ${KINDS[kind].cls}">${KINDS[kind].label}</span></td>
+    ${
+      looksBlank
+        ? `<td class="kind-cell" data-f="kind" title="눌러서 반대로 바꾸기 (= 키)"></td>`
+        : `<td class="kind-cell" data-f="kind" title="눌러서 반대로 바꾸기 (= 키)"><span class="kind-tag ${KINDS[kind].cls}">${KINDS[kind].label}</span></td>`
+    }
     ${num(money || blankNum ? '' : calc.tax, calc.tax < 0 ? 'neg' : '', 'tax')}
     ${
       money
@@ -1717,6 +1723,22 @@ function prefillCompanyName() {
 // 아직 아무것도 적지 않은 빈 줄인지.
 //  · 거래처는 자동으로 채워지므로 그 값 그대로면 '안 적은 것'으로 본다
 //  · 금액은 0으로 다시 계산돼 들어오기도 하므로 숫자로 비어 있는지 본다
+// 줄에 눈에 보이는 내용이 들어 있는지.
+// 날짜·참조는 새 줄에 저절로 붙는 값이라 여기서 세지 않는다 —
+// 빈 줄이 '이미 적힌 줄'처럼 보이지 않게 하려는 것
+const rowHasContent = (row) =>
+  !!row &&
+  !!(
+    String(row.companyName || '').trim() ||
+    String(row.name || '').trim() ||
+    String(row.spec || '').trim() ||
+    String(row.memo || '').trim() ||
+    Number(row.qty) ||
+    Number(row.price) ||
+    Number(row.supply) ||
+    row.touched // 날짜를 직접 적었거나 참조를 뒤집은 줄
+  );
+
 const isUntouchedBlank = (row) => {
   if (!row || row.kind !== 'new') return false;
   const co = String(row.companyName || '').trim();
@@ -1757,15 +1779,18 @@ function addRowFromEmptySpace() {
 }
 
 // No 를 다시 매긴다 — 저장된 줄만 1,2,3… (저장 안 된 줄은 번호 없음)
-// 저장된 줄만 1,2,3… 으로 번호를 매긴다.
-// 맨 아래 적는 줄이 아닌데 아직 저장되지 않은 줄은 '!' 로 표시해 눈에 띄게 한다
+// 1,2,3… 번호를 매긴다.
+// 저장된 줄뿐 아니라 **적기 시작한 줄에도 번호를 붙인다** — 번호가 빠진 줄이 있으면
+// 고장 난 것처럼 보인다는 피드백(2026-08-22). 아무것도 안 적은 빈 줄만 번호가 없다.
+// 맨 아래 적는 줄이 아닌데 아직 저장되지 않은 줄은 주황 바탕으로 따로 표시한다
 function renumberRows() {
   let n = 0;
   const lastNew = gridRows.reduce((acc, r, i) => (r.kind === 'new' ? i : acc), -1);
   gridRows.forEach((r, i) => {
     if (r.kind === 'tx') { r.no = ++n; r.unsaved = false; return; }
-    r.unsaved = i !== lastNew && !isUntouchedBlank(r);
-    r.no = r.unsaved ? '!' : '';
+    const has = rowHasContent(r);
+    r.unsaved = has && i !== lastNew;
+    r.no = has ? ++n : '';
   });
 }
 
@@ -1904,6 +1929,7 @@ async function toggleRowKind(r) {
 async function flipRowKind(r, keepEditing) {
   const row = gridRows[r];
   if (!row) return;
+  row.touched = true; // 참조를 손으로 뒤집었으면 빈 줄로 보지 않는다
   row.txKind = KINDS[kindOf(row.txKind)].pair;
   if (isMoneyOnly(row.txKind) && row.supply !== '' && row.supply != null) {
     // 입금은 +, 출금은 − (컴장부와 같게)
@@ -2048,12 +2074,55 @@ function applyCellValue() {
     // 품목을 비운 채 칸을 떠나면 직전에 적은 품목을 그대로 불러온다
     if (field === 'name' && value === '' && row.kind === 'new' && fillNewRowFromLast(row)) leaveMoneyOnly(row);
   }
-  if (row.kind === 'new' && field === 'date') state.entryDate = value;
+  if (row.kind === 'new' && field === 'date') {
+    state.entryDate = value;
+    row.touched = true; // 날짜를 직접 적었으면 빈 줄로 보지 않는다
+  }
   // 화면 숫자는 서버 응답을 기다리지 않고 그 자리에서 다시 계산한다
   if (!isMoneyOnly(row.txKind) && !row.multi && field !== 'supply') recalcRowAmounts(row);
+  // 적기 시작한 줄에 번호가 새로 붙을 수 있으니 뒤 줄 번호도 맞춰 다시 그린다
+  const oldNos = gridRows.map((x) => x.no);
+  renumberRows();
   paintRow(r);
+  gridRows.forEach((x, k) => {
+    if (k !== r && x.no !== oldNos[k]) paintRow(k);
+  });
+  // 거래처·품목이 정해지면 그 거래처에서 마지막에 쓴 단가를 불러온다
+  if (field === 'company' || field === 'name') fillPriceFromProduct(r);
   updateSummaryOnly();
   return r;
+}
+
+// 거래처 + 품명으로 그 거래처에서 마지막에 쓴 단가를 찾아 단가 칸을 채운다.
+// 단가가 비어 있을 때만 채우고, 손으로 적은 값은 건드리지 않는다
+async function fillPriceFromProduct(r) {
+  const row = gridRows[r];
+  const empty = (v) => v === '' || v == null || !Number(v);
+  if (!row || row.multi || isMoneyOnly(row.txKind)) return false;
+  const cid = Number(row.companyId) || 0;
+  const name = String(row.name || '').trim().toLowerCase();
+  if (!cid || !name || !empty(row.price)) return false;
+  let list;
+  try {
+    list = await getProducts(cid);
+  } catch (e) {
+    return false;
+  }
+  const p = list.find((x) => String(x.name || '').trim().toLowerCase() === name);
+  if (!p || !Number(p.price)) return false;
+  // 기다리는 사이에 줄이 바뀌었거나 단가를 손으로 적었으면 그대로 둔다
+  if (gridRows[r] !== row || String(row.name || '').trim().toLowerCase() !== name || !empty(row.price)) return false;
+  row.price = p.price;
+  recalcRowAmounts(row);
+  // 마침 단가 칸을 적고 있다면 그 입력창에도 값을 넣어 준다
+  if (gridEdit && gridEdit.r === r && gridEdit.field === 'price' && !gridEdit.input.value.trim()) {
+    gridEdit.input.value = p.price;
+    gridEdit.orig = String(p.price);
+    gridEdit.input.select();
+  }
+  paintRow(r);
+  updateSummaryOnly();
+  return true;
 }
 
 // 입금·출금 줄에 품목·수량·단가를 적으면 물건이 오가는 참조로 바꾼다
