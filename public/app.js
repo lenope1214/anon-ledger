@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.21.8'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.21.9'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -1770,7 +1770,14 @@ function setCursorRow(i) {
 function prefillCompanyName() {
   for (let i = gridRows.length - 1; i >= 0; i--) {
     const r = gridRows[i];
-    if (r.kind === 'tx' && String(r.companyName || '').trim()) return String(r.companyName).trim();
+    if (!r || !String(r.companyName || '').trim()) continue;
+    // 거래처만 채워진 줄(적으려고 열어 둔 빈 줄)은 건너뛴다.
+    // 방금 적어서 아직 저장 중인 줄은 세어야 한다 — 저장을 기다리느라
+    // 바로 앞 거래처가 미리 채워지던 문제 (2026-08-23)
+    const onlyCompany =
+      !String(r.name || '').trim() && !Number(r.qty) && !Number(r.price) && !Number(r.supply);
+    if (r.kind !== 'tx' && onlyCompany) continue;
+    return String(r.companyName).trim();
   }
   const c = state.companies.find((x) => String(x.id) === String(state.entryCompanyId));
   return c ? c.name : '';
@@ -1782,10 +1789,11 @@ function prefillCompanyName() {
 // 줄에 눈에 보이는 내용이 들어 있는지.
 // 날짜·참조는 새 줄에 저절로 붙는 값이라 여기서 세지 않는다 —
 // 빈 줄이 '이미 적힌 줄'처럼 보이지 않게 하려는 것
-const rowHasContent = (row) =>
+// 거래처를 뺀 나머지에 뭔가 적혔는지.
+// 거래처는 빈 줄에 저절로 채워지므로 '적었다'의 근거로 삼지 않는다
+const rowTypedBeyondCompany = (row) =>
   !!row &&
   !!(
-    String(row.companyName || '').trim() ||
     String(row.name || '').trim() ||
     String(row.spec || '').trim() ||
     String(row.memo || '').trim() ||
@@ -1795,8 +1803,11 @@ const rowHasContent = (row) =>
     row.touched // 날짜를 직접 적었거나 참조를 뒤집은 줄
   );
 
+const rowHasContent = (row) => !!row && !!(String(row.companyName || '').trim() || rowTypedBeyondCompany(row));
+
 const isUntouchedBlank = (row) => {
   if (!row || row.kind !== 'new') return false;
+  if (row.touched) return false; // 날짜를 직접 적었거나 참조를 뒤집은 줄
   const co = String(row.companyName || '').trim();
   if (co && co !== prefillCompanyName()) return false;
   return (
@@ -1908,7 +1919,7 @@ function ensureTrailingBlank() {
 function syncBlankRow() {
   gridRows.forEach((r, i) => {
     if (r.kind !== 'new') return;
-    if (r.companyName || r.name || r.spec || r.qty !== '' || r.price !== '') return;
+    if (r.companyName || r.name || r.spec || r.qty !== '' || r.price !== '' || r.touched) return;
     r.date = state.entryDate || today();
     r.txKind = state.entryKind;
     if (!(gridEdit && gridEdit.r === i)) paintRow(i);
@@ -2097,7 +2108,7 @@ function closeCellEditor() {
 
 // 편집 중인 값을 줄에 반영한다 (leaveRow=true면 줄을 벗어나는 상황)
 // 적던 값을 그 자리에서 화면에 반영한다 (저장은 뒤에서 따로)
-function applyCellValue() {
+function applyCellValue(mayLeave) {
   if (!gridEdit) return null;
   const { r, field, input, orig } = gridEdit;
   const row = gridRows[r];
@@ -2127,8 +2138,10 @@ function applyCellValue() {
   } else {
     row[field] = value;
     if (['name', 'spec'].includes(field) && value !== '') leaveMoneyOnly(row);
-    // 품목을 비운 채 칸을 떠나면 직전에 적은 품목을 그대로 불러온다
-    if (field === 'name' && value === '' && row.kind === 'new' && fillNewRowFromLast(row)) leaveMoneyOnly(row);
+    // 품목을 비운 채 **같은 줄 안에서** 칸을 옮기면 직전에 적은 품목을 그대로 불러온다.
+    // 줄을 아예 떠날 때(다른 줄 클릭·바깥 클릭)는 채우지 않는다 — 적다 만 줄이
+    // 저절로 만들어지지 않게 (2026-08-23)
+    if (field === 'name' && value === '' && row.kind === 'new' && !mayLeave && fillNewRowFromLast(row)) leaveMoneyOnly(row);
   }
   if (row.kind === 'new' && field === 'date') {
     state.entryDate = value;
@@ -2269,7 +2282,7 @@ function queueRowSave(r, mayLeave) {
         const row = gridRows[r];
         if (!row) return;
         if (row.kind === 'tx') await saveExistingRow(row, r);
-        else if (mayLeave) await saveNewRowIfReady(r);
+        else if (mayLeave && !(await saveNewRowIfReady(r))) resetUntouchedRow(r);
       } finally {
         const left = (pendingSaves.get(r) || 1) - 1;
         if (left > 0) pendingSaves.set(r, left);
@@ -2288,7 +2301,7 @@ function queueRowSave(r, mayLeave) {
 
 // 값만 바로 반영하고 저장은 뒤에서 — 칸 이동이 기다리지 않게 한다
 function commitCellNow(mayLeave) {
-  const r = applyCellValue();
+  const r = applyCellValue(mayLeave);
   if (r == null) return;
   queueRowSave(r, mayLeave);
   updateSaveBar();
@@ -2345,12 +2358,29 @@ async function saveExistingRow(row, r, keepEditing) {
 async function saveNewRowIfReady(r) {
   const row = gridRows[r];
   if (!row || row.kind !== 'new') return false;
+  // 커서 고정(F2) 등으로 거래처 칸을 거치지 않았으면 시트의 마지막 거래처를 쓴다
+  if (!row.companyName.trim() && rowTypedBeyondCompany(row)) {
+    const name = prefillCompanyName();
+    if (name) {
+      row.companyName = name;
+      const found = state.companies.find((c) => c.name.toLowerCase() === name.toLowerCase());
+      row.companyId = found ? found.id : 0;
+    }
+  }
   if (!row.companyName.trim()) return false;
   if (isMoneyOnly(row.txKind)) {
     if (!Number(row.supply)) return false; // 입금·출금은 금액이 있어야 저장
   } else {
-    if (!row.name.trim() && !fillNewRowFromLast(row)) return false;
-    if (!row.name.trim()) return false;
+    if (!row.name.trim()) {
+      // 거래처 말고는 아무것도 안 적은 줄은 저장하지 않는다 —
+      // 거래처 칸만 열었다가 다른 곳을 누른 것만으로 직전 줄이 통째로 복사되어
+      // 들어가던 문제 (2026-08-23). ESC 로 취소한 것과 같게 아무 일도 없어야 한다
+      if (!rowTypedBeyondCompany(row)) return false;
+      // 뭔가 적은 줄인데 품목만 비었으면 직전 품목을 그대로 쓴다
+      // (커서 고정으로 품목 칸을 건너뛰는 경우)
+      if (!fillNewRowFromLast(row)) return false;
+      if (!row.name.trim()) return false;
+    }
   }
 
   try {
@@ -2379,6 +2409,20 @@ async function saveNewRowIfReady(r) {
     toast('⚠ 저장하지 못했습니다 — ' + (e.message || '연결을 확인하세요'));
     return false;
   }
+}
+
+// 아무것도 적지 않은 채 줄을 떠나면, 자동으로 채워졌던 거래처까지 지워
+// 처음의 빈 줄 상태로 되돌린다 — ESC 로 취소한 것과 똑같이 보이게
+function resetUntouchedRow(r) {
+  const row = gridRows[r];
+  if (!row || row.kind !== 'new' || !isUntouchedBlank(row)) return;
+  if (!String(row.companyName || '').trim()) return; // 이미 깨끗한 줄
+  if (gridEdit && gridEdit.r === r) return;          // 그 줄을 다시 적기 시작했으면 두고 본다
+  row.companyName = '';
+  row.companyId = 0;
+  renumberRows();
+  paintRow(r);
+  drawCompanyPanel(true);
 }
 
 // 품명을 비워둔 채 저장하면 직전 품목을 그대로 가져온다
