@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.21.7'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.21.8'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -139,7 +139,11 @@ function openDialog(opt) {
   if (dlgResolve) closeDialog(false); // 창이 이미 떠 있으면 먼저 닫는다
   $('#dlgIcon').textContent = o.icon || (o.danger ? '🗑' : o.kind === 'alert' ? '❗' : '❓');
   $('#dlgTitle').textContent = o.title || (o.kind === 'alert' ? '알림' : '확인');
-  $('#dlgMsg').innerHTML = nl2br(o.message) + (o.note ? `<span class="dlg-note">${nl2br(o.note)}</span>` : '');
+  $('#dlgMsg').innerHTML =
+    nl2br(o.message) +
+    (o.note ? `<span class="dlg-note">${nl2br(o.note)}</span>` : '') +
+    // 복사해 가라고 보여주는 글(카톡 보내기 등)
+    (o.text != null ? `<textarea id="dlgText" class="dlg-text" readonly rows="8">${esc(o.text)}</textarea>` : '');
   const ok = $('#dlgOk');
   const cancel = $('#dlgCancel');
   ok.textContent = o.okText;
@@ -147,6 +151,10 @@ function openDialog(opt) {
   cancel.textContent = o.cancelText;
   cancel.classList.toggle('hidden', o.kind === 'alert');
   dlgPrevFocus = document.activeElement;
+  if (o.text != null) {
+    const ta = $('#dlgText');
+    if (ta) setTimeout(() => ta.select(), 0); // 바로 복사할 수 있게 글을 잡아 둔다
+  }
   const back = $('#dlg');
   back.classList.remove('hidden');
   back.setAttribute('aria-hidden', 'false');
@@ -175,7 +183,48 @@ function closeDialog(result) {
 const askConfirm = (message, opt) => openDialog(Object.assign({ kind: 'confirm', message }, opt));
 const showAlert = (message, opt) => openDialog(Object.assign({ kind: 'alert', message }, opt));
 
-$('#dlgOk').addEventListener('click', () => closeDialog(true));
+// 복사해 가라고 글을 보여주는 창 (클립보드가 막혔을 때 쓰는 대비책)
+const showCopyText = (text, opt) =>
+  openDialog(
+    Object.assign(
+      {
+        kind: 'confirm',
+        title: '아래 내용을 복사해 보내세요',
+        message: '',
+        note: '[복사] 버튼을 누르거나, 글을 길게 눌러 복사하세요.',
+        okText: '📋 복사',
+        cancelText: '닫기',
+        icon: '💬',
+        text,
+      },
+      opt
+    )
+  );
+
+// [복사] 버튼: 창 안의 글을 클립보드로 옮긴다
+function copyDialogText() {
+  const ta = $('#dlgText');
+  if (!ta) return false;
+  ta.focus();
+  ta.select();
+  let done = false;
+  try {
+    done = document.execCommand('copy');
+  } catch (e) {
+    done = false;
+  }
+  if (!done && navigator.clipboard) {
+    navigator.clipboard.writeText(ta.value).then(() => toast('복사했습니다. 카톡에 붙여넣으세요.')).catch(() => {});
+    return true;
+  }
+  toast(done ? '복사했습니다. 카톡에 붙여넣으세요.' : '복사하지 못했습니다 — 글을 길게 눌러 복사해 주세요.');
+  return done;
+}
+
+$('#dlgOk').addEventListener('click', () => {
+  if ($('#dlgText')) copyDialogText();
+  closeDialog(true);
+});
 $('#dlgCancel').addEventListener('click', () => closeDialog(false));
 $('#dlg').addEventListener('click', (e) => {
   if (e.target.id === 'dlg') closeDialog(false); // 바깥을 누르면 취소
@@ -191,9 +240,14 @@ document.addEventListener('keydown', (e) => {
   if (e.key === 'Escape') {
     e.preventDefault();
     closeDialog(false);
-  } else if (e.key === 'Enter') {
+    return;
+  }
+  // 복사하라고 보여준 글 안에서는 방향키·Space 를 그대로 쓸 수 있게 둔다
+  if (e.target && e.target.id === 'dlgText') return;
+  if (e.key === 'Enter') {
     e.preventDefault();
-    closeDialog(onlyOk || document.activeElement !== cancel);
+    if (onlyOk || document.activeElement !== cancel) ok.click();
+    else closeDialog(false);
   } else if (e.key === ' ' || e.key === 'Spacebar') {
     // 장부에서 Space 로 줄을 고르던 버릇 때문에 실수로 눌리지 않도록 막는다
     // (버튼에 커서가 있으면 Space 가 그 버튼을 누른 것으로 처리되기 때문)
@@ -345,7 +399,7 @@ function openCompanyForm(c) {
       toast('저장했습니다.');
       renderCompanies();
     } catch (err) {
-      alert(err.message);
+      await showAlert(err.message, { title: '저장하지 못했습니다', icon: '⚠' });
     }
   });
 }
@@ -758,7 +812,7 @@ function openProductForm(p) {
       toast('저장했습니다.');
       drawProductRows();
     } catch (err) {
-      alert(err.message);
+      await showAlert(err.message, { title: '저장하지 못했습니다', icon: '⚠' });
     }
   });
 }
@@ -1217,7 +1271,7 @@ function easyRecompute() {
 async function saveEasyEntry() {
   const companyName = $('#xCompany').value.trim();
   if (!state.entryCompanyId && !companyName) {
-    alert('상호를 적어주세요.');
+    await showAlert('상호를 적어주세요.', { title: '빠진 곳이 있습니다', icon: '✏️' });
     $('#xCompany').focus();
     return;
   }
@@ -1230,7 +1284,7 @@ async function saveEasyEntry() {
     }
   }
   if (!name) {
-    alert('품명을 적어주세요.');
+    await showAlert('품명을 적어주세요.', { title: '빠진 곳이 있습니다', icon: '✏️' });
     $('#xName').focus();
     return;
   }
@@ -1248,7 +1302,7 @@ async function saveEasyEntry() {
   try {
     tx = await api('POST', '/api/transactions', body);
   } catch (err) {
-    alert(err.message);
+    await showAlert(err.message, { title: '저장하지 못했습니다', icon: '⚠' });
     return;
   }
   state.entryDate = body.date;
@@ -1285,13 +1339,13 @@ async function drawEasyList() {
   }
   box.innerHTML = rows
     .map((t) => {
-      const it = t.items[0];
+      const it = t.items[0]; // 입금·출금은 품목이 없다 (items: [])
       const more = t.items.length > 1 ? ` 외 ${t.items.length - 1}건` : '';
       const kind = kindOf(t.kind);
       const buy = IN_KINDS.includes(kind);
       return `<div class="easy-item ${buy ? 'easy-item-buy' : ''}" data-id="${t.id}" data-kind="tx">
         <div class="easy-item-head"><b>${esc(t.companyName)}</b><span>${esc(t.date)}</span></div>
-        <div class="easy-item-name"><span class="kind-tag ${KINDS[kind].cls}">${KINDS[kind].label}</span> ${esc(it.name)}${more}</div>
+        <div class="easy-item-name"><span class="kind-tag ${KINDS[kind].cls}">${KINDS[kind].label}</span> ${it ? esc(it.name) + more : ''}</div>
         <div class="easy-item-foot">
           <b class="${t.total < 0 ? 'neg' : ''}">${won(t.total)}원</b>
           ${OUT_KINDS.includes(kind) ? '<button type="button" data-act="sheet">명세표</button>' : ''}
@@ -2965,7 +3019,7 @@ async function saveCompanyField(inp) {
   } catch (err) {
     c[field] = prev;
     inp.value = prev;
-    alert(err.message);
+    await showAlert(err.message, { title: '저장하지 못했습니다', icon: '⚠' });
   }
 }
 
@@ -3099,7 +3153,7 @@ document.addEventListener('keydown', (e) => {
 async function openTxForm(tx) {
   if (!state.companies.length) await refreshCompanies();
   if (!state.companies.length) {
-    alert('먼저 상호관리에서 상호를 등록하세요.');
+    await showAlert('먼저 상호관리에서 상호를 등록하세요.', { title: '등록된 상호가 없습니다', icon: '🏢' });
     return;
   }
   const companyId = tx ? tx.companyId : Number(state.txCompanyId) || state.companies[0].id;
@@ -3210,7 +3264,7 @@ async function openTxForm(tx) {
       }))
       .filter((it) => it.name);
     if (!items.length) {
-      alert('품목을 1개 이상 입력하세요.');
+      await showAlert('품목을 1개 이상 적어 주세요.', { title: '빠진 곳이 있습니다', icon: '✏️' });
       return;
     }
     const body = {
@@ -3230,7 +3284,7 @@ async function openTxForm(tx) {
       toast('저장했습니다.');
       drawTxRows();
     } catch (err) {
-      alert(err.message);
+      await showAlert(err.message, { title: '저장하지 못했습니다', icon: '⚠' });
     }
   });
 
@@ -3459,7 +3513,7 @@ function openStatement(tx) {
         });
         toast('상호 정보를 저장했습니다.');
       } catch (err) {
-        alert(err.message);
+        await showAlert(err.message, { title: '저장하지 못했습니다', icon: '⚠' });
       }
     });
   });
@@ -3504,7 +3558,7 @@ $('#btnShareSheet').addEventListener('click', async () => {
     toast('명세서 내용을 복사했습니다. 카톡에 붙여넣으세요.');
   } catch (e) {
     if (e && e.name === 'AbortError') return; // 사용자가 공유를 취소함
-    prompt('아래 내용을 복사해 보내세요.', text);
+    await showCopyText(text);
   }
 });
 
@@ -3566,14 +3620,21 @@ function renderSettings() {
       e.target.reset();
       toast('비밀번호를 변경했습니다.');
     } catch (err) {
-      alert(err.message);
+      await showAlert(err.message, { title: '바꾸지 못했습니다', icon: '⚠' });
     }
   });
   $('#restoreFile').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     e.target.value = '';
     if (!file) return;
-    if (!confirm(`'${file.name}' 파일의 내용으로 장부 전체를 교체할까요?\n현재 등록된 상호·제품·거래가 모두 백업 파일 내용으로 바뀝니다.`)) return;
+    const ok = await askConfirm(`'${file.name}' 파일의 내용으로 장부 전체를 바꿀까요?`, {
+      title: '백업에서 되살리기',
+      note: '지금 등록된 상호·제품·거래가 모두 이 백업 파일 내용으로 바뀝니다. 되돌릴 수 없습니다.',
+      okText: '바꾸기',
+      icon: '♻️',
+      danger: true,
+    });
+    if (!ok) return;
     try {
       const data = JSON.parse(await file.text());
       await api('POST', '/api/restore', data);
@@ -3581,7 +3642,7 @@ function renderSettings() {
       state.settings = await api('GET', '/api/settings');
       render();
     } catch (err) {
-      alert('복원 실패: ' + (err.message || '파일을 읽을 수 없습니다.'));
+      await showAlert(err.message || '파일을 읽을 수 없습니다.', { title: '되살리지 못했습니다', icon: '⚠' });
     }
   });
 }
@@ -3650,7 +3711,7 @@ async function renderAdmin() {
       }
       renderAdmin();
     } catch (err) {
-      alert(err.message);
+      await showAlert(err.message, { title: '처리하지 못했습니다', icon: '⚠' });
     }
   };
 }
@@ -3680,7 +3741,7 @@ function renderOnboarding() {
     try {
       state.settings = await api('PUT', '/api/settings', Object.fromEntries(new FormData(e.target)));
     } catch (err) {
-      alert(err.message);
+      await showAlert(err.message, { title: '저장하지 못했습니다', icon: '⚠' });
       return;
     }
     toast('업체 정보를 저장했습니다. 이제 거래를 입력해 보세요!');
@@ -3804,7 +3865,10 @@ function tourVisible(sel) {
 
 function startTour() {
   if (state.easyMode) {
-    alert('큰 글씨 모드에서는 화면 그대로 하나씩 적으면 됩니다.\n날짜 → 상호 → 품명 → 수량 → 단가를 채우고 [저장하기]를 누르세요.');
+    showAlert('화면에 보이는 대로 하나씩 적으면 됩니다.\n날짜 → 상호 → 품명 → 수량 → 단가를 채우고 [저장하기]를 누르세요.', {
+      title: '큰 글씨 모드 사용법',
+      icon: '🔎',
+    });
     return;
   }
   if (state.tab !== 'transactions') {
@@ -3925,7 +3989,7 @@ window.addEventListener('resize', () => {
 
 /* ─────────────── 시작 ─────────────── */
 $('#btnLogout').addEventListener('click', async () => {
-  if (!confirm('로그아웃할까요?')) return;
+  if (!(await askConfirm('로그아웃할까요?', { title: '로그아웃', okText: '로그아웃', icon: '👋' }))) return;
   await api('POST', '/api/auth/logout');
   location.href = '/login.html';
 });
