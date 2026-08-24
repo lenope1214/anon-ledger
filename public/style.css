@@ -886,6 +886,11 @@ body.easy .fab, body.easy .fab-help { display: none; }
 .sheet-items thead th { background: #f3f4f6; text-align: center; color: #000; }
 .sheet-items tfoot th { background: #f3f4f6; text-align: center; }
 .sheet-items .filler td { color: transparent; }
+/* 명세표 첫 칸(날짜)은 가운데로 — 예전 '번호' 칸 자리 */
+.sheet-items .sheet-day { text-align: center; white-space: nowrap; }
+/* 비고 칸 — 글이 길어도 줄바꿈되게 */
+.sheet-items .sheet-note { word-break: break-all; font-size: 0.9em; }
+.sheet-items th:last-child, .sheet-items td:last-child { width: 14%; }
 
 .sheet-summary { width: 100%; border: 1px solid #000; margin-bottom: 0.8rem; }
 .sheet-summary th { background: #f3f4f6; border: 1px solid #999; padding: 0.35rem 0.45rem; white-space: nowrap; }

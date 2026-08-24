@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.21.9'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.22.0'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -2587,7 +2587,7 @@ function updateSelSummary() {
         <option value="">🔁 참조를 바꾸기…</option>
         ${KIND_LIST.map((k) => `<option value="${k}">${withRo(KINDS[k].label)} 바꾸기</option>`).join('')}
       </select>` +
-    (canBundle ? ' <button type="button" id="btnBundleSheet" class="bundle-btn">🧾 선택한 것 한 장으로</button>' : '') +
+    (canBundle ? ' <button type="button" id="btnBundleSheet" class="bundle-btn">🧾 명세서 출력</button>' : '') +
     ' <button type="button" id="btnDelSelInline" class="bundle-btn del-sel">🗑 선택한 것 지우기</button>';
   const btn = $('#btnBundleSheet');
   if (btn) btn.addEventListener('click', openBundleStatement);
@@ -3479,14 +3479,13 @@ function openBundleStatement() {
   const companyIds = [...new Set(list.map((t) => t.companyId))];
   if (companyIds.length > 1) return toast('한 상호의 거래만 묶을 수 있습니다. 상호 하나만 골라 주세요.');
 
-  // 품명 앞에 날짜(월/일)를 붙여 어느 날 것인지 알아볼 수 있게 한다
+  // 명세표 첫 칸이 날짜이므로(v1.22.0) 줄마다 그 거래의 날짜를 들려 보낸다
   const multiDay = new Set(list.map((t) => t.date)).size > 1;
-  const items = list.flatMap((t) =>
-    t.items.map((it) => Object.assign({}, it, { name: (multiDay ? t.date.slice(5).replace('-', '/') + ' ' : '') + it.name }))
-  );
+  const items = list.flatMap((t) => t.items.map((it) => Object.assign({}, it, { date: t.date, memo: t.memo || '' })));
   const vatModes = [...new Set(list.map((t) => t.vatMode))];
   const bundle = {
     id: 0,
+    bundle: true,
     companyId: list[0].companyId,
     companyName: list[0].companyName,
     date: multiDay ? `${list[0].date} ~ ${list[list.length - 1].date}` : list[0].date,
@@ -3501,25 +3500,35 @@ function openBundleStatement() {
   openStatement(bundle);
 }
 
+// 명세표 첫 칸에 넣을 날짜 — 좁은 칸에 들어가게 월/일만 쓴다
+function sheetDate(v) {
+  const d = String(v || '').trim();
+  const m = d.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  return m ? `${m[2]}/${m[3]}` : d;
+}
+
 function openStatement(tx) {
   const company = state.companies.find((c) => c.id === tx.companyId) || { name: tx.companyName || '' };
   const s = state.settings;
   const MIN_ROWS = 10;
+  // 비고는 거래마다 붙는다 — 묶음이면 줄마다, 한 건짜리면 첫 줄에만 적는다
+  const rowMemo = (it, i) => (it.memo != null ? it.memo : i === 0 ? tx.memo || '' : '');
   const rows = tx.items
     .map(
       (it, i) => `<tr>
-        <td class="num">${i + 1}</td>
+        <td class="sheet-day">${esc(sheetDate(it.date || tx.date))}</td>
         <td>${esc(it.name)}</td>
         <td>${esc(it.spec)}</td>
         <td class="num">${won(Math.abs(it.qty))}</td>
         <td class="num">${won(it.price)}</td>
         <td class="num">${won(it.supply)}</td>
         <td class="num">${won(it.tax)}</td>
+        <td class="sheet-note">${esc(rowMemo(it, i))}</td>
       </tr>`
     )
     .join('');
   let filler = '';
-  for (let i = tx.items.length; i < MIN_ROWS; i++) filler += '<tr class="filler">' + '<td>&nbsp;</td>'.repeat(7) + '</tr>';
+  for (let i = tx.items.length; i < MIN_ROWS; i++) filler += '<tr class="filler">' + '<td>&nbsp;</td>'.repeat(8) + '</tr>';
 
   $('#printSheet').innerHTML = `
     <div class="sheet">
@@ -3530,16 +3539,16 @@ function openStatement(tx) {
         ${partyTable('공급자', s)}
       </div>
       <table class="sheet-items">
-        <thead><tr><th>번호</th><th>품명</th><th>규격</th><th>수량</th><th>단가</th><th>공급가액</th><th>세액</th></tr></thead>
+        <thead><tr><th>날짜</th><th>품명</th><th>규격</th><th>수량</th><th>단가</th><th>공급가액</th><th>세액</th><th>비고</th></tr></thead>
         <tbody>${rows}${filler}</tbody>
         <tfoot>
-          <tr><th colspan="5">합계</th><td class="num">${won(tx.supplyTotal)}</td><td class="num">${won(tx.taxTotal)}</td></tr>
+          <tr><th colspan="5">합계</th><td class="num">${won(tx.supplyTotal)}</td><td class="num">${won(tx.taxTotal)}</td><td></td></tr>
         </tfoot>
       </table>
       <table class="sheet-summary">
         <tr><th>합계금액</th><td class="num">${won(tx.total)}원</td></tr>
       </table>
-      ${tx.memo ? `<p class="sheet-memo">비고: ${esc(tx.memo)}</p>` : ''}
+      ${tx.bundle && tx.memo ? `<p class="sheet-memo">${esc(tx.memo)}</p>` : ''}
       <p class="sheet-sign">인수자: ____________ (인)</p>
     </div>`;
   // 공급받는자 칸 수정 → 상호관리에 바로 저장
@@ -3574,7 +3583,12 @@ function statementText(tx, company) {
     `[거래명세서] ${tx.date}`,
     `${company.name} 귀하`,
     '',
-    ...tx.items.map((it) => `· ${it.name}${it.spec ? '(' + it.spec + ')' : ''} ${won(Math.abs(it.qty))}개 x ${won(it.price)}원 = ${won(it.supply + it.tax)}원`),
+    ...tx.items.map(
+      (it) =>
+        `· ${it.date && it.date !== tx.date ? sheetDate(it.date) + ' ' : ''}${it.name}${it.spec ? '(' + it.spec + ')' : ''} ` +
+        `${won(Math.abs(it.qty))}개 x ${won(it.price)}원 = ${won(it.supply + it.tax)}원` +
+        (it.memo ? ` (${it.memo})` : '')
+    ),
     '',
     `공급가액 ${won(tx.supplyTotal)}원 / 세액 ${won(tx.taxTotal)}원`,
     `합계 ${won(tx.total)}원`,
