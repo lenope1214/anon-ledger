@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.22.0'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.22.1'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -3518,7 +3518,6 @@ function openStatement(tx) {
       (it, i) => `<tr>
         <td class="sheet-day">${esc(sheetDate(it.date || tx.date))}</td>
         <td>${esc(it.name)}</td>
-        <td>${esc(it.spec)}</td>
         <td class="num">${won(Math.abs(it.qty))}</td>
         <td class="num">${won(it.price)}</td>
         <td class="num">${won(it.supply)}</td>
@@ -3528,7 +3527,7 @@ function openStatement(tx) {
     )
     .join('');
   let filler = '';
-  for (let i = tx.items.length; i < MIN_ROWS; i++) filler += '<tr class="filler">' + '<td>&nbsp;</td>'.repeat(8) + '</tr>';
+  for (let i = tx.items.length; i < MIN_ROWS; i++) filler += '<tr class="filler">' + '<td>&nbsp;</td>'.repeat(7) + '</tr>';
 
   $('#printSheet').innerHTML = `
     <div class="sheet">
@@ -3539,10 +3538,10 @@ function openStatement(tx) {
         ${partyTable('공급자', s)}
       </div>
       <table class="sheet-items">
-        <thead><tr><th>날짜</th><th>품명</th><th>규격</th><th>수량</th><th>단가</th><th>공급가액</th><th>세액</th><th>비고</th></tr></thead>
+        <thead><tr><th>날짜</th><th>품명</th><th>수량</th><th>단가</th><th>공급가액</th><th>세액</th><th>비고</th></tr></thead>
         <tbody>${rows}${filler}</tbody>
         <tfoot>
-          <tr><th colspan="5">합계</th><td class="num">${won(tx.supplyTotal)}</td><td class="num">${won(tx.taxTotal)}</td><td></td></tr>
+          <tr><th colspan="4">합계</th><td class="num">${won(tx.supplyTotal)}</td><td class="num">${won(tx.taxTotal)}</td><td></td></tr>
         </tfoot>
       </table>
       <table class="sheet-summary">
@@ -3585,7 +3584,7 @@ function statementText(tx, company) {
     '',
     ...tx.items.map(
       (it) =>
-        `· ${it.date && it.date !== tx.date ? sheetDate(it.date) + ' ' : ''}${it.name}${it.spec ? '(' + it.spec + ')' : ''} ` +
+        `· ${it.date && it.date !== tx.date ? sheetDate(it.date) + ' ' : ''}${it.name} ` +
         `${won(Math.abs(it.qty))}개 x ${won(it.price)}원 = ${won(it.supply + it.tax)}원` +
         (it.memo ? ` (${it.memo})` : '')
     ),
