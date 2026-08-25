@@ -298,9 +298,20 @@ form label input, form label select { margin-top: 0.2rem; font-weight: 400; }
 #txRows td.chk:has(input) { cursor: pointer; }
 #txRows tr.row-checked td { background: #fde68a; }
 #txRows tr.row-checked td.kind-cell .kind-tag { background: #fff; }
-#txRows tr.row-pointer { outline: 2px solid var(--accent); outline-offset: -2px; }
-/* 칸을 적는 중에는 그 칸 테두리만 보이면 되니 줄 테두리는 없앤다 */
-#txRows tr.row-pointer:has(td.cell-editing) { outline: none; }
+/* 지금 고른 '칸' — 줄 전체가 아니라 칸 하나에 테두리를 두른다 (엑셀처럼, v1.23.0)
+   Enter 를 치거나 글자를 치면 이 칸에 입력창이 열린다 */
+/* 정렬할 수 있는 머리글 */
+.grid-table thead th.th-sort { cursor: pointer; user-select: none; }
+.grid-table thead th.th-sort:hover { background: #e2e8f0; }
+.grid-table thead th.th-sort.sorted { color: var(--accent-dark); font-weight: 700; }
+
+#txRows td.cell-cursor {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: #eff6ff;
+}
+#txRows tr.row-checked td.cell-cursor { background: #fcd34d; }
+#txRows tr.row-buy td.cell-cursor { background: #fff1e2; }
 .sel-summary { color: var(--accent-dark); font-weight: 700; }
 .bundle-btn {
   margin-left: 0.4rem;
