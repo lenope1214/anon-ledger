@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.23.1'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.23.2'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -2579,7 +2579,9 @@ function startRowEdit(r) {
   if (!row) return;
   const pinned = state.pinnedField && state.pinnedField.startsWith('g-') ? state.pinnedField.slice(2) : '';
   const fields = editableFields(row);
-  const field = fields.includes(pinned) ? pinned : row.kind === 'new' ? 'company' : fields[0];
+  // 줄 끝(비고)에서 Enter 를 치면 다음 줄의 **날짜** 칸부터 시작한다 (v1.23.2).
+  // 예전에는 새 줄만 거래처부터 열려서 날짜를 고치려면 되돌아가야 했다
+  const field = fields.includes(pinned) ? pinned : fields[0];
   openCellEditor(r, field);
   const tr = $(`#txRows tr[data-r="${r}"]`);
   if (tr) scrollRowIntoView(tr);
