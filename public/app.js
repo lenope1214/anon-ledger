@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.22.1'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.23.0'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -24,6 +24,7 @@ const state = {
   txFrom: '',           // 거래 필터: 시작일
   txTo: '',             // 거래 필터: 종료일
   txProductQuery: '',   // 거래 필터: 품명 검색어
+  txSort: 'date',       // 줄 정렬: 'date' 날짜순 / 'company' 거래처 가나다순
 };
 state.easyMode = false; // 큰 글씨 간편 입력 (휴대폰·어르신용)
 try {
@@ -33,6 +34,8 @@ try {
   const savedKind = localStorage.getItem('entryKind2');
   if (savedKind) state.entryKind = savedKind;
   state.easyMode = localStorage.getItem('easyMode') === '1';
+  const savedSort = localStorage.getItem('txSort');
+  if (savedSort === 'company' || savedSort === 'date') state.txSort = savedSort;
 } catch (e) { /* localStorage 사용 불가 환경 */ }
 
 const VAT_LABEL = { separate: '부가세 별도', included: '부가세 포함', none: '부가세 없음' };
@@ -992,13 +995,14 @@ async function renderTransactions() {
 
       <div class="table-wrap ledger-wrap">
         <table class="ledger-table grid-table">
-          <thead><tr><th class="chk"></th><th class="rowno">No</th><th>날짜</th><th>거래처</th><th>품목</th><th class="num">수량</th><th class="num">단가</th><th class="num">공급가액</th><th>참조</th><th class="num">부가세</th><th class="num">합계</th><th>비고</th><th class="actions"></th></tr></thead>
+          <thead><tr><th class="chk"></th><th class="rowno">No</th><th class="th-sort" data-sort="date" data-label="날짜" title="날짜순으로 정렬">날짜</th><th class="th-sort" data-sort="company" data-label="거래처" title="거래처를 가나다순으로 정렬 (다시 누르면 날짜순)">거래처</th><th>품목</th><th class="num">수량</th><th class="num">단가</th><th class="num">공급가액</th><th>참조</th><th class="num">부가세</th><th class="num">합계</th><th>비고</th><th class="actions"></th></tr></thead>
           <tbody id="txRows"></tbody>
         </table>
       </div>
       <div id="coPanel" class="co-panel"></div>
       <p class="hint sheet-hint">
-        <span><b>Enter</b> 다음 칸 · 줄 끝 저장</span>
+        <span><b>Enter</b> 칸 열기 · 다음 칸 · 줄 끝 저장</span>
+        <span><b>Ctrl+Enter</b> 맨 아래 줄</span>
         <span><b>↑↓←→</b> 칸 이동</span>
         <span><b>Tab</b> 검색</span>
         <span><b>=</b> 참조 반전</span>
@@ -1052,6 +1056,11 @@ async function renderTransactions() {
     state.txKindFilter = e.target.value;
     drawTxRows();
   });
+  // 머리글을 누르면 그 칸 기준으로 정렬한다 (거래처는 가나다순)
+  $$('#main .grid-table thead th[data-sort]').forEach((th) => {
+    th.addEventListener('click', () => sortTxBy(th.dataset.sort === state.txSort ? 'date' : th.dataset.sort));
+  });
+  paintSortMark();
   $('#entryKind').addEventListener('change', (e) => {
     state.entryKind = kindOf(e.target.value);
     try {
@@ -1850,6 +1859,33 @@ function addRowFromEmptySpace() {
 // 저장된 줄뿐 아니라 **적기 시작한 줄에도 번호를 붙인다** — 번호가 빠진 줄이 있으면
 // 고장 난 것처럼 보인다는 피드백(2026-08-22). 아무것도 안 적은 빈 줄만 번호가 없다.
 // 맨 아래 적는 줄이 아닌데 아직 저장되지 않은 줄은 주황 바탕으로 따로 표시한다
+// 어느 칸으로 정렬돼 있는지 머리글에 ▲ 로 표시한다
+function paintSortMark() {
+  $$('#main .grid-table thead th[data-sort]').forEach((th) => {
+    const on = th.dataset.sort === state.txSort;
+    th.classList.toggle('sorted', on);
+    th.textContent = on ? th.dataset.label + ' ▲' : th.dataset.label;
+  });
+}
+
+// 정렬을 바꾸고, 보고 있던 줄로 커서를 되돌린다
+async function sortTxBy(sort) {
+  if (!['date', 'company'].includes(sort)) return;
+  const cur = gridRows[gridCursor.r];
+  const keepId = cur && cur.kind === 'tx' ? cur.id : 0;
+  const keepField = gridCursor.field;
+  state.txSort = sort;
+  try {
+    localStorage.setItem('txSort', sort);
+  } catch (e) { /* 무시 */ }
+  await drawTxRows();
+  paintSortMark();
+  if (keepId) {
+    const i = gridRows.findIndex((r) => r.kind === 'tx' && r.id === keepId);
+    if (i >= 0) selectCell(i, keepField);
+  }
+}
+
 function renumberRows() {
   let n = 0;
   const lastNew = gridRows.reduce((acc, r, i) => (r.kind === 'new' ? i : acc), -1);
@@ -1939,10 +1975,18 @@ async function drawTxRows() {
   if (state.txKindFilter) list = list.filter((t) => kindOf(t.kind) === state.txKindFilter);
   $('#txSummary').textContent = summaryText(list.map(rowFromTx));
 
-  // 저장된 줄을 날짜순으로 깔고, 맨 아래에 빈 줄 한 줄을 붙인다
+  // 저장된 줄을 정렬해 깔고, 맨 아래에 빈 줄 한 줄을 붙인다
+  // (기본은 날짜순, 거래처 머리글을 누르면 가나다순)
+  const byCompany = state.txSort === 'company';
   gridRows = list
-    .map((t) => Object.assign(rowFromTx(t), { sortKey: t.date + '|' + String(t.id).padStart(8, '0') }))
-    .sort((a, b) => a.sortKey.localeCompare(b.sortKey));
+    .map((t) =>
+      Object.assign(rowFromTx(t), {
+        sortKey: byCompany
+          ? (t.companyName || '') + '\u0001' + t.date + '\u0001' + String(t.id).padStart(8, '0')
+          : t.date + '|' + String(t.id).padStart(8, '0'),
+      })
+    )
+    .sort((a, b) => a.sortKey.localeCompare(b.sortKey, 'ko'));
   for (let k = 0; k < BLANK_ROWS; k++) gridRows.push(blankRow());
 
   renumberRows();
@@ -1951,6 +1995,9 @@ async function drawTxRows() {
   drawCompanyPanel(true);
   bindGridEvents(tbody);
   fillGridSpace();
+  // 이어 적을 자리(맨 아래 빈 줄)에 칸 표시를 둔다
+  const lastIdx = gridRows.length - 1;
+  if (gridRows[lastIdx]) selectCell(lastIdx, editableFields(gridRows[lastIdx])[0], false);
   // 새로 적을 수 있는 첫 빈 줄이 보이도록
   scrollToBlankRow();
 }
@@ -1983,7 +2030,12 @@ function bindGridEvents(tbody) {
     }
     setCursorRow(i); // 어디를 누르든 그 줄을 '지금 줄'로 삼는다
     if (td.classList.contains('kind-cell') && td.dataset.f === 'kind') return toggleRowKind(i);
-    if (td.dataset.edit) await openCellEditor(i, td.dataset.f);
+    if (!td.dataset.edit) return selectCell(i, gridCursor.field, false); // 자동 계산 칸은 줄만 옮긴다
+    // 마우스 화면에서는 누르면 '칸 고르기'까지만 하고, Enter 나 글자를 쳐야 입력창이 열린다.
+    // 손가락으로 쓰는 기기는 Enter 키가 없으니 예전처럼 바로 입력창을 연다
+    if (isTouchDevice()) return openCellEditor(i, td.dataset.f);
+    if (gridEdit) commitCellNow(gridEdit.r !== i); // 적던 칸이 있으면 먼저 반영
+    selectCell(i, td.dataset.f, false);
   };
 }
 
@@ -2100,9 +2152,10 @@ async function openCellEditor(r, field) {
 
 function closeCellEditor() {
   if (!gridEdit) return;
-  const { r } = gridEdit;
+  const { r, field } = gridEdit;
   gridEdit = null;
   paintRow(r);
+  selectCell(r, field, false); // 입력창을 닫으면 그 칸을 고른 상태로 남긴다
   updateSaveBar();
 }
 
@@ -2534,6 +2587,7 @@ function onCellKey(e) {
   if (e.isComposing || e.keyCode === 229) return;
   if (e.key === 'Enter') {
     e.preventDefault();
+    if (e.ctrlKey || e.metaKey) return jumpToEntryRow(); // 맨 아래 적는 줄로
     moveCell(0, 1);
   } else if (e.key === 'Tab') {
     e.preventDefault();
@@ -2621,13 +2675,86 @@ function scrollRowIntoView(tr) {
   }
 }
 
-// 포인터(현재 위치) 행 표시 — 어느 행에서 이어갈지 파란 테두리로 보여준다
+// 지금 고른 '칸' 표시 — 줄 전체가 아니라 칸 하나에 테두리를 두른다 (엑셀처럼)
+// (v1.23.0에서 줄 표시(row-pointer)를 걷어내고 칸 표시로 바꿨다)
+const cellElAt = (r, field) => $(`#txRows tr[data-r="${r}"] td[data-f="${field}"]`);
+
+function paintCellCursor() {
+  $$('#txRows td.cell-cursor').forEach((td) => td.classList.remove('cell-cursor'));
+  if (gridEdit) return; // 적는 중이면 입력창 테두리로 충분하다
+  const td = cellElAt(gridCursor.r, gridCursor.field);
+  if (td) td.classList.add('cell-cursor');
+}
+
 function updatePointerHighlight() {
-  const rows = $$('#txRows tr');
-  rows.forEach((tr) => tr.classList.remove('row-pointer'));
-  if (sheetLastIdx != null && sheetLastIdx >= 0 && rows[sheetLastIdx]) {
-    rows[sheetLastIdx].classList.add('row-pointer');
+  // Ins·Space 로 줄을 훑을 때도 칸 표시가 그 줄을 따라가게 한다
+  if (sheetLastIdx != null && sheetLastIdx >= 0 && gridRows[sheetLastIdx]) gridCursor.r = sheetLastIdx;
+  paintCellCursor();
+}
+
+// 칸 하나를 고른다 (입력창은 아직 열지 않는다)
+function selectCell(r, field, scroll) {
+  const row = gridRows[r];
+  if (!row) return;
+  const fields = editableFields(row);
+  gridCursor.r = r;
+  gridCursor.field = fields.includes(field) ? field : fields[0];
+  sheetLastIdx = r;
+  paintCellCursor();
+  drawCompanyPanel();
+  updateSaveBar();
+  if (scroll !== false) {
+    const tr = rowElAt(r);
+    if (tr) scrollRowIntoView(tr);
   }
+}
+
+// 고른 칸을 옮긴다 (입력창을 열지 않고 표 위를 돌아다닌다)
+function moveSelection(dr, dfield) {
+  const r = gridCursor.r;
+  const row = gridRows[r];
+  if (!row) return;
+  const fields = editableFields(row);
+  let nr = r;
+  let nf = gridCursor.field;
+  if (dfield) {
+    const i = fields.indexOf(nf);
+    const ni = i + dfield;
+    if (ni < 0) { nr = r - 1; nf = '\u0000끝'; }       // 윗줄 마지막 칸으로
+    else if (ni >= fields.length) { nr = r + 1; nf = ''; } // 아랫줄 첫 칸으로
+    else nf = fields[ni];
+  } else {
+    nr = r + dr;
+  }
+  if (nr < 0) return;
+  if (nr >= gridRows.length) {
+    if (!ensureTrailingBlank()) return;
+    if (nr >= gridRows.length) return;
+  }
+  const tFields = editableFields(gridRows[nr]);
+  const tf = nf === '\u0000끝' ? tFields[tFields.length - 1] : nf === '' ? tFields[0] : tFields.includes(nf) ? nf : tFields[0];
+  selectCell(nr, tf);
+}
+
+// 맨 아래 적는 줄로 내려가 바로 적기 시작한다 (Ctrl+Enter)
+function jumpToEntryRow() {
+  ensureTrailingBlank();
+  const last = gridRows.length - 1;
+  if (last < 0) return;
+  if (gridEdit) commitCellNow(gridEdit.r !== last);
+  startRowEdit(last);
+  scrollToBlankRow();
+}
+
+// 글자를 치면 그 글자로 입력을 시작한다 (엑셀처럼)
+async function startTypingInCell(r, field, ch) {
+  await openCellEditor(r, field);
+  if (!gridEdit || gridEdit.r !== r || gridEdit.field !== field) return;
+  if (field === 'date' || ch == null) return; // 날짜는 달력 입력칸이라 그대로 연다
+  gridEdit.input.value = ch;
+  gridEdit.orig = '';
+  const len = gridEdit.input.value.length;
+  try { gridEdit.input.setSelectionRange(len, len); } catch (err) { /* 무시 */ }
 }
 
 // Ins 연속 체크: 포인터의 다음 행을 체크 (키를 누르고 있으면 반복)
@@ -2699,10 +2826,61 @@ function undoCheckRow() {
   updateSelSummary();
 }
 
+// 손가락으로 쓰는 기기인지 (터치는 Enter 키가 없어 예전처럼 바로 입력창을 연다)
+const isTouchDevice = () => window.matchMedia && window.matchMedia('(pointer: coarse)').matches;
+
+// 장부에서 키를 받을 상황인지 (창·검색·다른 입력칸에 있으면 아니다)
+function gridKeyReady(e) {
+  if (state.tab !== 'transactions' || state.easyMode) return false;
+  if (dialogOpen() || searchSheetOpen()) return false;
+  if (!$('#modal').classList.contains('hidden')) return false;
+  if (document.body.classList.contains('printing')) return false;
+  const t = e.target;
+  if (t && t.closest && t.closest('select, textarea')) return false;
+  const inp = t && t.closest && t.closest('input');
+  if (inp && !(inp.type === 'checkbox' && inp.closest('#txRows'))) return false;
+  return true;
+}
+
+const NUM_CELLS = ['qty', 'price', 'supply', 'paid'];
+
+/* ── 칸을 고른 상태에서 쓰는 키 (입력창이 열려 있지 않을 때) ──
+   방향키로 칸을 옮기고, Enter 나 글자를 치면 그때 입력창이 열린다 (엑셀처럼) */
+document.addEventListener('keydown', (e) => {
+  if (gridEdit || !gridKeyReady(e)) return;
+  if (!gridRows[gridCursor.r]) return;
+  const field = gridCursor.field;
+
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    if (e.ctrlKey || e.metaKey) return jumpToEntryRow(); // 맨 아래 적는 줄로
+    return openCellEditor(gridCursor.r, field);
+  }
+  if (e.key === 'ArrowDown') { e.preventDefault(); return moveSelection(1, 0); }
+  if (e.key === 'ArrowUp') { e.preventDefault(); return moveSelection(-1, 0); }
+  if (e.key === 'ArrowRight') { e.preventDefault(); return moveSelection(0, 1); }
+  if (e.key === 'ArrowLeft') { e.preventDefault(); return moveSelection(0, -1); }
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    // 거래처·품목 칸에서는 Tab 이 검색창을 연다 (적는 중일 때와 같게)
+    if (field === 'company' || field === 'name') return openCellEditor(gridCursor.r, field).then(openContextSearch);
+    return moveSelection(0, e.shiftKey ? -1 : 1);
+  }
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  // 한글 입력기로 글자를 치기 시작하면 입력창부터 연다 (조합은 그대로 이어진다)
+  if (e.isComposing || e.keyCode === 229) return startTypingInCell(gridCursor.r, field, null);
+  if (e.key.length !== 1) return;
+  if (e.key === ' ' || e.key === '=') return;                 // 연속 선택 · 참조 반전에 쓰는 키
+  if (e.key === '-' && !NUM_CELLS.includes(field)) return;    // 글자 칸에서는 '건너뛰기'
+  e.preventDefault();
+  startTypingInCell(gridCursor.r, field, e.key);
+});
+
 document.addEventListener('keydown', (e) => {
   if (state.tab !== 'transactions' || gridEdit) return;
   // Ins 는 맥 키보드에 없어서 Space 로도 연속 선택이 되게 한다
   if (!['Insert', ' ', 'Spacebar', '-', 'Backspace', '=', 'Delete'].includes(e.key)) return;
+  if (e.key === '-' && NUM_CELLS.includes(gridCursor.field)) return; // 숫자 칸에서는 음수 부호로 쓴다
   // 입력 중일 땐 원래 동작 유지 — 다만 방금 누른 체크 네모는 예외
   // (줄을 클릭해 체크하면 그 네모가 포커스를 갖는데, 이때도 '='로 이어서 체크되어야 한다)
   if (e.target.closest('select, textarea')) return;
