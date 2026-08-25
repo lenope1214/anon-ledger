@@ -1,6 +1,6 @@
 'use strict';
 
-const APP_VERSION = '1.23.0'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
+const APP_VERSION = '1.23.1'; // 버전을 올릴 때 package.json·index.html·login.html의 ?v= 와 같이 맞춘다
 
 /* ─────────────── 공통 유틸 ─────────────── */
 const $ = (sel, el = document) => el.querySelector(sel);
@@ -995,7 +995,7 @@ async function renderTransactions() {
 
       <div class="table-wrap ledger-wrap">
         <table class="ledger-table grid-table">
-          <thead><tr><th class="chk"></th><th class="rowno">No</th><th class="th-sort" data-sort="date" data-label="날짜" title="날짜순으로 정렬">날짜</th><th class="th-sort" data-sort="company" data-label="거래처" title="거래처를 가나다순으로 정렬 (다시 누르면 날짜순)">거래처</th><th>품목</th><th class="num">수량</th><th class="num">단가</th><th class="num">공급가액</th><th>참조</th><th class="num">부가세</th><th class="num">합계</th><th>비고</th><th class="actions"></th></tr></thead>
+          <thead><tr><th class="chk"></th><th class="rowno">No</th><th class="th-sort" data-sort="date" data-label="날짜" title="날짜순으로 정렬">날짜</th><th class="th-sort" data-sort="company" data-label="거래처" title="거래처를 가나다순으로 정렬 (ESC 를 누르면 날짜순으로 돌아옵니다)">거래처</th><th>품목</th><th class="num">수량</th><th class="num">단가</th><th class="num">공급가액</th><th>참조</th><th class="num">부가세</th><th class="num">합계</th><th>비고</th><th class="actions"></th></tr></thead>
           <tbody id="txRows"></tbody>
         </table>
       </div>
@@ -1056,9 +1056,10 @@ async function renderTransactions() {
     state.txKindFilter = e.target.value;
     drawTxRows();
   });
-  // 머리글을 누르면 그 칸 기준으로 정렬한다 (거래처는 가나다순)
+  // 머리글을 누르면 그 칸 기준으로 정렬한다 (거래처는 가나다순).
+  // 되돌리기는 ESC — 거래처가 한 곳뿐이면 눌러도 순서가 그대로라 '안 먹는' 것처럼 보였다
   $$('#main .grid-table thead th[data-sort]').forEach((th) => {
-    th.addEventListener('click', () => sortTxBy(th.dataset.sort === state.txSort ? 'date' : th.dataset.sort));
+    th.addEventListener('click', () => sortTxBy(th.dataset.sort));
   });
   paintSortMark();
   $('#entryKind').addEventListener('change', (e) => {
@@ -1869,8 +1870,9 @@ function paintSortMark() {
 }
 
 // 정렬을 바꾸고, 보고 있던 줄로 커서를 되돌린다
-async function sortTxBy(sort) {
+async function sortTxBy(sort, quiet) {
   if (!['date', 'company'].includes(sort)) return;
+  if (sort === state.txSort) return; // 이미 그 순서면 그대로 둔다
   const cur = gridRows[gridCursor.r];
   const keepId = cur && cur.kind === 'tx' ? cur.id : 0;
   const keepField = gridCursor.field;
@@ -1883,6 +1885,9 @@ async function sortTxBy(sort) {
   if (keepId) {
     const i = gridRows.findIndex((r) => r.kind === 'tx' && r.id === keepId);
     if (i >= 0) selectCell(i, keepField);
+  }
+  if (!quiet) {
+    toast(sort === 'company' ? '거래처 가나다순으로 정렬했습니다 · ESC 를 누르면 날짜순으로 돌아옵니다' : '날짜순으로 돌아왔습니다.');
   }
 }
 
@@ -3368,6 +3373,11 @@ document.addEventListener('keydown', (e) => {
   if (gridEdit) {
     e.preventDefault();
     return closeCellEditor(); // 적던 값을 버리고 편집만 닫는다
+  }
+  // 닫을 게 없으면 정렬을 원래대로(날짜순) 되돌린다
+  if (state.txSort !== 'date') {
+    e.preventDefault();
+    return sortTxBy('date');
   }
 });
 
